@@ -211,6 +211,15 @@ function regenerate(ppm: number) {
   renderCropRail();
   renderReadout();
   renderPreviews();
+  // The small editor canvas's WYSIWYG background is a snapshot of THIS
+  // result.field, taken separately from the big preview. Centralized here
+  // rather than left to each caller: two different call sites already forgot
+  // it independently (dropping a new shape from the palette, then dragging
+  // an existing one to reposition it — "only the contour appears at the new
+  // place and the old shape remains" until something else happened to
+  // trigger a redraw). Every regenerate() now keeps it in sync by
+  // construction, so a third call site can't reintroduce the same bug.
+  if (state.sourceKind === 'custom') renderEditor();
 }
 
 /**
@@ -579,7 +588,15 @@ function syncInputs() {
   const s = effectiveStipple();
   const set = (id: string, v: string) => {
     const n = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
-    if (n) n.value = v;
+    // Never overwrite the field the user is actively typing into. numInput()
+    // calls syncInputs() on every keystroke so OTHER fields' derived/clamped
+    // values stay live — but doing that to the focused field itself fights
+    // the user's own typing: type "5" of an intended "50" into height
+    // (min 30, max 260), it clamps to "30" mid-keystroke, the next keystroke
+    // "0" lands after it making "300", which then clamps to the max, 260.
+    // numInput() re-syncs explicitly on 'change' (blur/commit), so the
+    // clamped value still shows the moment the field is no longer focused.
+    if (n && n !== document.activeElement) n.value = v;
   };
   set('diameter', String(state.diameterMm));
   set('height', String(state.heightMm));
@@ -601,6 +618,21 @@ function syncInputs() {
   set('annotationText', state.annotationText);
   set('annotationX', String(state.annotationXFrac));
   set('annotationSize', String(state.annotationSizeMm));
+  // Range scales with the actual can height rather than a fixed +/-40mm, so
+  // "top"/"bottom" can still reach all the way to the opposite edge on a
+  // tall can, and "center" spans exactly bottom-to-top either way — reported
+  // as not going "high or low enough" on a can taller than ~80mm.
+  const offsetEl = document.getElementById('annotationOffset') as HTMLInputElement | null;
+  if (offsetEl) {
+    const half = state.heightMm / 2;
+    offsetEl.min = String(-half);
+    offsetEl.max = String(half);
+    // A shorter can can shrink the range below the current value. The range
+    // input clamps what it DISPLAYS on its own, but state.annotationYOffsetMm
+    // wouldn't otherwise follow — which would silently position the text
+    // outside the can while the slider shows something else.
+    state.annotationYOffsetMm = Math.min(half, Math.max(-half, state.annotationYOffsetMm));
+  }
   set('annotationOffset', String(state.annotationYOffsetMm));
   set('ledHoleDiameter', state.ledHoleDiameterMm.toFixed(1));
 
@@ -652,7 +684,7 @@ const draftThenFull = () => {
 // ---------- wiring ----------
 function numInput(id: string, apply: (v: number) => void, immediate = false) {
   const input = el<HTMLInputElement>(id);
-  input.addEventListener('input', () => {
+  const run = () => {
     const v = parseFloat(input.value);
     if (!Number.isFinite(v)) return;
     apply(v);
@@ -663,7 +695,13 @@ function numInput(id: string, apply: (v: number) => void, immediate = false) {
     } else {
       draftThenFull();
     }
-  });
+  };
+  input.addEventListener('input', run);
+  // syncInputs() deliberately skips the focused field (see its comment), so a
+  // value clamped by `apply` doesn't visibly correct itself until the field
+  // is no longer focused. 'change' fires on blur/commit, after focus has
+  // already moved on, so this re-run is what actually shows it.
+  input.addEventListener('change', run);
 }
 
 numInput('diameter', (v) => {

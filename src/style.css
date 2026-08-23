@@ -379,8 +379,20 @@ input[type="range"].vslider {
 
 .scroll-hint { display: none; font-size: 11px; color: var(--text-dim); }
 
-.rotate-row { display: flex; align-items: center; gap: 10px; margin-top: 7px; max-width: 420px; }
-.rotate-row input[type="range"] { flex: 1; }
+/*
+ * Centred the same way .can-row centres the mount: span the full width and
+ * centre the CONTENT within it, rather than capping the row's own width and
+ * leaving it flush-left. Those aren't the same thing — a row capped to 420px
+ * with no centring just sits at the container's left edge, while .can-row
+ * spans the full (much wider) preview column and centres its child in that.
+ * Two different alignment strategies on stacked siblings meant the rotate
+ * slider's midpoint had no reason to land under the can's, and didn't:
+ * reported as "the can mockup isn't above the rotate bar" / "all the way to
+ * the right" (the can was centred correctly — just not against what the
+ * slider beneath it was doing).
+ */
+.rotate-row { display: flex; align-items: center; gap: 10px; margin-top: 7px; justify-content: center; }
+.rotate-row input[type="range"] { flex: 1; max-width: 380px; }
 .rotate-row span { font-size: 11px; color: var(--text-dim); }
 
 .can-style-select { width: auto; font-size: 11.5px; padding: 4px 6px; }
@@ -390,6 +402,13 @@ input[type="range"].vslider {
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
+  /* Matches .rotate-row's own max-width below. Without a cap here,
+     render3d.ts's stageW (= mount.clientWidth) grows to fill the whole
+     preview pane on a wide screen, but .rotate-row stays capped at 420px —
+     the can, centred within its own much-wider row, ends up nowhere near
+     centred over the narrower, left-anchored slider beneath it. Reported as
+     "the can is all the way to the right" / "isn't above the rotate bar". */
+  max-width: 420px;
 }
 .can3d-stage {
   position: relative;
