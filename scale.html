@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Scale check</title>
+  <style>
+    body { background:#0e1013; color:#e6e8eb; font-family: ui-monospace, monospace; padding:14px; }
+    h1 { font-size:14px; }
+    .row { display:flex; gap:8px; align-items:flex-start; margin-bottom:16px; }
+    .cell { background:#181b20; border:1px solid #2c313a; border-radius:5px; padding:5px; }
+    .cell canvas { display:block; background:#000; border-radius:3px; }
+    .cap { font-size:10px; color:#9aa1ab; margin-top:4px; }
+    .name { color:#e0a45a; font-weight:bold; font-size:12px; width:88px; flex:none; padding-top:24px; }
+    #log { font-size:11px; color:#9aa1ab; white-space:pre-wrap; margin-bottom:10px; }
+  </style>
+</head>
+<body>
+  <h1>Scale check — each preset at several diameters (same px/mm, so sizes are directly comparable)</h1>
+  <div id="log">rendering…</div>
+  <div id="out"></div>
+  <script type="module" src="/src/scale.ts"></script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Can Lamp Generator</title>
+</head>
+<body>
+  <header>
+    <h1>Perforated Can Lamp Generator</h1>
+    <p>Laser-ready SVG perforation patterns for aluminium can lamps</p>
+  </header>
+
+  <div class="layout">
+    <aside class="controls">
+      <section class="ctrl">
+        <h2>Can</h2>
+        <div class="field">
+          <label>Can size</label>
+          <select id="canSize"></select>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label>Diameter <span class="val" id="diameterVal"></span></label>
+            <input type="number" id="diameter" min="40" max="120" step="0.1" />
+          </div>
+          <div class="field">
+            <label>Wall height <span class="val" id="heightVal"></span></label>
+            <input type="number" id="height" min="30" max="260" step="0.1" />
+          </div>
+        </div>
+        <p class="hint" id="aspectWarn" style="display:none;"></p>
+        <div class="warning">
+          Straight cylindrical section only — neck taper and base flare excluded.
+          Perforating a taper puts the galvo out of focus.
+        </div>
+      </section>
+
+      <section class="ctrl">
+        <h2>Source</h2>
+        <div class="segmented" id="sourceSeg">
+          <button data-source="preset" class="active">Preset</button>
+          <button data-source="custom">Make your own</button>
+        </div>
+
+        <div id="presetPane" style="margin-top:10px;">
+          <select id="preset"></select>
+          <p class="hint" id="presetDesc"></p>
+        </div>
+      </section>
+
+      <section class="ctrl" id="customPane" style="display:none;">
+        <h2>Shapes</h2>
+        <div class="cat-tabs" id="catTabs"></div>
+        <div class="palette" id="palette"></div>
+        <p class="hint">Drag a shape onto the canvas. Click to select, shift-click to add.
+          Arrow keys nudge; <b>Delete</b> removes.</p>
+
+        <div class="preview-canvas-wrap" id="editorWrap">
+          <canvas id="editorCanvas"></canvas>
+        </div>
+
+        <div class="toolrow" id="toolrow">
+          <span class="toolgroup-label">Align</span>
+          <button data-align="left" title="Align left edge">⇤</button>
+          <button data-align="centerX" title="Align centres horizontally">↔</button>
+          <button data-align="right" title="Align right edge">⇥</button>
+          <button data-align="bottom" title="Align bottoms">⇩</button>
+          <button data-align="middleY" title="Align middles vertically">↕</button>
+          <button data-align="top" title="Align tops">⇧</button>
+        </div>
+        <div class="toolrow">
+          <span class="toolgroup-label">Arrange</span>
+          <button data-tool="distributeAround" title="Space evenly around the can">⋯</button>
+          <button data-tool="distributeVertical" title="Space evenly vertically">⁝</button>
+          <button data-tool="mirrorH" title="Mirror horizontally">◫</button>
+          <button data-tool="mirrorV" title="Mirror vertically">⬓</button>
+          <button data-tool="duplicate" title="Duplicate">⧉</button>
+        </div>
+        <div class="toolrow">
+          <span class="toolgroup-label">Ring</span>
+          <input type="number" id="ringCount" min="2" max="48" step="1" value="6" />
+          <button data-tool="ringArray" title="Repeat evenly around the circumference">Repeat around</button>
+        </div>
+
+        <div id="shapeProps" style="display:none;margin-top:9px;">
+          <div class="row2">
+            <div class="field">
+              <label>Size <span class="val" id="shapeSizeVal"></span></label>
+              <input type="range" id="shapeSize" min="2" max="70" step="0.5" />
+            </div>
+            <div class="field">
+              <label>Rotation <span class="val" id="shapeRotVal"></span></label>
+              <input type="range" id="shapeRot" min="0" max="360" step="1" />
+            </div>
+          </div>
+        </div>
+        <div class="row2" style="margin-top:8px;">
+          <button class="secondary" id="deleteShape">Delete</button>
+          <button class="secondary" id="clearShapes">Clear all</button>
+        </div>
+        <p class="hint" id="selInfo"></p>
+      </section>
+
+      <section class="ctrl">
+        <h2>Quality <span class="tag" id="qualityLabel"></span></h2>
+        <input type="range" id="quality" min="0" max="3" step="1" />
+        <div class="ticks"><span>Draft</span><span>Standard</span><span>Fine</span><span>Ultra</span></div>
+      </section>
+
+      <section class="ctrl">
+        <h2>Hole size</h2>
+        <div class="segmented" id="holeModeSeg">
+          <button data-mode="varying" class="active">Varying</button>
+          <button data-mode="fixed">Fixed</button>
+        </div>
+        <div class="field" id="fixedDiameterField" style="margin-top:10px;display:none;">
+          <label>Fixed diameter (mm) <span class="val" id="fixedDiameterVal"></span></label>
+          <input type="number" id="fixedDiameter" min="0.1" max="2" step="0.01" />
+        </div>
+      </section>
+
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <div class="field">
+          <label>Tone mode</label>
+          <select id="toneMode">
+            <option value="hybrid">Hybrid (density + size)</option>
+            <option value="am">AM (size only)</option>
+            <option value="fm">FM (density only)</option>
+          </select>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label>Pitch <span class="val" id="pitchVal"></span></label>
+            <input type="number" id="pitch" min="0.4" max="4" step="0.01" />
+          </div>
+          <div class="field">
+            <label>Jitter <span class="val" id="jitterVal"></span></label>
+            <input type="number" id="jitter" min="0" max="0.5" step="0.01" />
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label>Min Ø <span class="val" id="dMinVal"></span></label>
+            <input type="number" id="dMin" min="0.05" max="2" step="0.01" />
+          </div>
+          <div class="field">
+            <label>Max Ø <span class="val" id="dMaxVal"></span></label>
+            <input type="number" id="dMax" min="0.05" max="2" step="0.01" />
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label>Threshold <span class="val" id="threshVal"></span></label>
+            <input type="number" id="thresh" min="0" max="0.6" step="0.01" />
+          </div>
+          <div class="field">
+            <label>Knee <span class="val" id="kneeVal"></span></label>
+            <input type="number" id="knee" min="0.05" max="1" step="0.01" />
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label>Size γ <span class="val" id="stippleGammaVal"></span></label>
+            <input type="number" id="stippleGamma" min="0.2" max="2" step="0.05" />
+          </div>
+          <div class="field">
+            <label>Min-web target <span class="val" id="minWebTargetVal"></span></label>
+            <input type="number" id="minWebTarget" min="0.05" max="1" step="0.01" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Cut time / hole (s) <span class="val" id="secPerHoleVal"></span></label>
+          <input type="number" id="secPerHole" min="0.005" max="0.5" step="0.005" />
+        </div>
+      </details>
+
+      <section class="ctrl">
+        <h2>Live readout</h2>
+        <div class="readout">
+          <div class="label">Canvas</div><div class="value" id="roCanvas">-</div>
+          <div class="label">Sample grid</div><div class="value" id="roGrid">-</div>
+          <div class="label">Hole count</div><div class="value" id="roHoleCount">-</div>
+          <div class="label">Measured min web</div><div class="value" id="roMinWeb">-</div>
+          <div class="label">Open area</div><div class="value" id="roOpenArea">-</div>
+          <div class="label">Est. cut time</div><div class="value" id="roCutTime">-</div>
+          <div class="label">Generation</div><div class="value" id="roGenTime">-</div>
+        </div>
+      </section>
+
+      <section class="ctrl">
+        <button class="primary" id="exportBtn">Export SVG</button>
+      </section>
+    </aside>
+
+    <main class="preview">
+      <div class="preview-toolbar">
+        <div class="segmented small" id="viewSeg">
+          <button data-view="both" class="active">Both</button>
+          <button data-view="flat">Flat only</button>
+          <button data-view="can">3D only</button>
+        </div>
+      </div>
+
+      <div class="preview-block" id="flatBlock">
+        <div class="head">
+          <h3>Flat / unwrapped</h3>
+          <div class="segmented small">
+            <button data-preview="lit" class="active">Lit</button>
+            <button data-preview="unlit">Unlit</button>
+            <button data-preview="field">Field</button>
+          </div>
+        </div>
+        <div class="flat-row">
+          <div class="preview-canvas-wrap">
+            <canvas id="flatCanvas"></canvas>
+          </div>
+          <div class="crop-rail" id="cropRail" style="display:none;">
+            <span class="crop-cap">top</span>
+            <input type="range" id="panY" min="0" max="1" step="0.005" class="vslider" />
+            <span class="crop-cap">btm</span>
+          </div>
+        </div>
+        <div class="flat-foot">
+          <label class="tilecheck"><input type="checkbox" id="tile2x" /> Tile 2× to verify the seam</label>
+          <span class="crop-readout" id="cropReadout"></span>
+        </div>
+      </div>
+
+      <div class="preview-block" id="canBlock">
+        <div class="head">
+          <h3>3D can mockup</h3>
+          <select id="canStyle" class="can-style-select"></select>
+        </div>
+        <div id="can3dMount" class="can3d-mount"></div>
+        <div class="rotate-row">
+          <span>Rotate</span>
+          <input type="range" id="rotate" min="0" max="1" step="0.001" value="0" />
+        </div>
+        <p class="hint">Drag the can to spin it, or use the slider.</p>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

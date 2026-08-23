@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Preset contact sheet</title>
+  <style>
+    body { background:#0e1013; color:#e6e8eb; font-family: ui-monospace, monospace; padding:16px; }
+    h1 { font-size:15px; }
+    .grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:14px; }
+    figure { margin:0; background:#181b20; border:1px solid #2c313a; border-radius:6px; padding:8px; }
+    figcaption { font-size:11px; color:#9aa1ab; margin-top:6px; line-height:1.45; }
+    figcaption b { color:#e0a45a; }
+    canvas { display:block; width:100%; height:auto; background:#000; border-radius:3px; }
+    #log { font-size:11px; color:#9aa1ab; white-space:pre-wrap; margin-bottom:12px; }
+  </style>
+</head>
+<body>
+  <h1>Preset contact sheet — lit preview @ Ø65 × 142 mm</h1>
+  <div id="log">rendering...</div>
+  <div class="grid" id="grid"></div>
+  <script type="module" src="/src/contact.ts"></script>
+</body>
+</html>
