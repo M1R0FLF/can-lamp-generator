@@ -6,7 +6,3 @@ Thumbs.db
 .vscode/
 *.log
 .claude/*.lock
-
-# one-off generated samples from early testing, not source
-/mango_salvaje_preview_unlit.png
-/mango_salvaje_variabel_generated.svg

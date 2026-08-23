@@ -1,4 +1,5 @@
 import './style.css';
+import { inject as injectAnalytics } from '@vercel/analytics';
 import { generate, GenerateResult, SourceSpec, resultToSvg, DESIGN_HEIGHT_MM } from './engine/generate';
 import { PRESETS, getPreset } from './engine/presets';
 import { Hole, StippleMode, StippleParams, DEFAULT_STIPPLE } from './engine/stipple';
@@ -1051,6 +1052,7 @@ el<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
 });
 
 // ---------- init ----------
+injectAnalytics(); // no-ops locally; only sends events once served from Vercel
 applyViewMode();
 syncInputs();
 regenerate(PPM_FULL);
