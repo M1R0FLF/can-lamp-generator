@@ -27,7 +27,14 @@ import {
   shapesInCategory,
   getShapeDef,
 } from './engine/shapes/library';
-import { QUALITY_PRESETS, DEFAULT_QUALITY_INDEX, DEFAULT_MIN_WEB_TARGET, DEFAULT_SEC_PER_HOLE } from './engine/qualityPresets';
+import {
+  QUALITY_PRESETS,
+  DEFAULT_QUALITY_INDEX,
+  DEFAULT_MIN_WEB_TARGET,
+  DEFAULT_LASER_SPEED,
+  DEFAULT_LASER_PASSES,
+  estimateCutSeconds,
+} from './engine/qualityPresets';
 import { CAN_SIZES, DEFAULT_CAN, clampCan, aspectWarning, matchCanSize } from './engine/canSizes';
 
 const PPM_DRAFT = 4;
@@ -53,7 +60,8 @@ interface State {
   /** stipple overrides the user has explicitly touched */
   overrides: Partial<StippleParams>;
   minWebTarget: number;
-  secPerHole: number;
+  laserSpeed: number;
+  laserPasses: number;
   previewMode: PreviewMode;
   viewMode: ViewMode;
   tile2x: boolean;
@@ -76,7 +84,8 @@ const state: State = {
   fixedDiameter: 0.35,
   overrides: {},
   minWebTarget: DEFAULT_MIN_WEB_TARGET,
-  secPerHole: DEFAULT_SEC_PER_HOLE,
+  laserSpeed: DEFAULT_LASER_SPEED,
+  laserPasses: DEFAULT_LASER_PASSES,
   previewMode: 'lit',
   viewMode: 'both',
   tile2x: false,
@@ -197,7 +206,7 @@ function renderReadout() {
   let area = 0;
   for (const h of r.holes) area += Math.PI * h.r * h.r;
   setText('roOpenArea', `${((100 * area) / (r.W * r.H)).toFixed(1)} %`);
-  setText('roCutTime', formatDuration(r.holes.length * state.secPerHole));
+  setText('roCutTime', formatDuration(estimateCutSeconds(r.holes.length, state.laserSpeed, state.laserPasses)));
   setText('roGenTime', `${(r.buildMs + r.sampleMs).toFixed(0)} ms`);
 }
 
@@ -403,7 +412,8 @@ function syncInputs() {
   set('stippleGamma', s.gamma.toFixed(2));
   set('toneMode', s.mode);
   set('minWebTarget', state.minWebTarget.toFixed(2));
-  set('secPerHole', state.secPerHole.toFixed(3));
+  set('laserSpeed', String(state.laserSpeed));
+  set('laserPasses', String(state.laserPasses));
   set('panY', String(state.panY));
 
   setText('diameterVal', `${state.diameterMm.toFixed(1)} mm`);
@@ -429,7 +439,8 @@ function syncInputs() {
   setText('kneeVal', s.knee.toFixed(2));
   setText('stippleGammaVal', s.gamma.toFixed(2));
   setText('minWebTargetVal', state.minWebTarget.toFixed(2));
-  setText('secPerHoleVal', state.secPerHole.toFixed(3));
+  setText('laserSpeedVal', `${state.laserSpeed} mm/s`);
+  setText('laserPassesVal', String(state.laserPasses));
   setText('presetDesc', getPreset(state.presetId).description);
 }
 
@@ -542,7 +553,8 @@ el<HTMLSelectElement>('toneMode').addEventListener('change', () => {
 });
 
 numInput('minWebTarget', (v) => (state.minWebTarget = v), true);
-numInput('secPerHole', (v) => (state.secPerHole = v), true);
+numInput('laserSpeed', (v) => (state.laserSpeed = v), true);
+numInput('laserPasses', (v) => (state.laserPasses = Math.round(v)), true);
 
 // source toggle
 el('sourceSeg').addEventListener('click', (e) => {

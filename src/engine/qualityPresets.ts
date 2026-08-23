@@ -19,4 +19,39 @@ export const QUALITY_PRESETS: QualityPreset[] = [
 
 export const DEFAULT_QUALITY_INDEX = 1; // Standard
 export const DEFAULT_MIN_WEB_TARGET = 0.3; // mm, per CLAUDE.md rule 2
-export const DEFAULT_SEC_PER_HOLE = 0.04; // rough pierce+cut assumption, user-tunable
+
+/**
+ * Cut-time model, calibrated against two real jobs on an xTool fiber 20W
+ * with rotary attachment (speed 10 mm/s, 5 passes):
+ *
+ *   Mango Salvaje, default quality: 6,008 holes -> 3h30m measured
+ *   Escarcha,      default quality: 7,965 holes -> 3h50m measured
+ *
+ * Model: time = holes * K * passes / speed. A perimeter-based model (time
+ * driven by each hole's circumference, i.e. bigger holes cost more) was
+ * tried first and fit WORSE — implied per-hole overhead varied 40% between
+ * the two jobs instead of 21%. That's consistent with a rotary attachment:
+ * unlike a galvo, which can reverse direction almost instantly, the rotary
+ * axis has real inertia, so repositioning between holes isn't meaningfully
+ * faster than cutting itself. Time is dominated by per-hole overhead that
+ * itself scales with the speed setting, not by tracing more perimeter.
+ *
+ * Fitting K from both jobs pooled (hole-count-weighted) and checking each
+ * job individually gives about +/-10% error — see the derivation in
+ * CLAUDE.md-adjacent commit history if this ever needs re-deriving. That's
+ * the honest error bar with two data points; treat the estimate as rough.
+ *
+ * Known blind spot: hole SIZE isn't in the model at all. Both calibration
+ * jobs used similar average hole diameters (~0.42-0.45mm); a job with much
+ * larger fixed holes will likely take longer than this predicts. Refine
+ * with a perimeter term if a data point with a very different hole size
+ * shows up.
+ */
+export const CUT_TIME_K = 3.78;
+export const DEFAULT_LASER_SPEED = 10; // mm/s
+export const DEFAULT_LASER_PASSES = 5;
+
+export function estimateCutSeconds(holeCount: number, speedMmS: number, passes: number): number {
+  if (speedMmS <= 0) return Infinity;
+  return holeCount * CUT_TIME_K * passes / speedMmS;
+}
