@@ -27,24 +27,42 @@ export const DESIGN_HEIGHT_MM = 142;
 const EDGE_MARGIN_MM = 0.3;
 
 /**
- * A real through-cut for the LED strip's power cable — one clean circle, laser
- * traces only its border, nothing to do with the stippled pattern. Lives on
- * `CanSpec` rather than the design/source, because which physical can you're
- * holding is what decides whether it needs a wire hole at all, not which
- * pattern is on it.
+ * A real through-cut for the LED strip's power cable, laser tracing only its
+ * border — nothing to do with the stippled pattern. Lives on `CanSpec` rather
+ * than the design/source, because which physical can you're holding is what
+ * decides whether it needs a wire hole at all, not which pattern is on it.
  *
- * Front/back convention (new, and the reason this doesn't need a "which way
- * is front" setting): the flat design is authored to be VIEWED centred at
- * x = W/2, so the wall's horizontal centre is the front the viewer sees on a
- * shelf, and the seam at x = 0/W is the back. The hole sits a few mm off the
- * exact seam (not on it) so the cut never has to straddle the sheet's two
- * edges — see the placement comment in generate().
+ * Shape: a semicircular notch flush with the can's bottom edge (see
+ * `GenerateResult.ledNotch` and the D-shaped path built in generate()), not a
+ * floating circle — a first version centred a plain circle ~10mm up the wall,
+ * and got corrected on sight: "the led hole should be at the full bottom of
+ * can, even be a 'U' shaped cutout. NOT THERE." A notch open at the edge is
+ * also easier to assemble — the cable lays in sideways rather than having to
+ * be threaded end-first through a fully enclosed hole.
+ *
+ * That "flush with the edge" is safe specifically BECAUSE `heightMm` is
+ * already the *straight* section only (CLAUDE.md: neck taper and base flare
+ * are excluded, and perforating a taper puts the galvo out of focus) — so the
+ * design's own y=H boundary is the actual edge of where it's safe to cut, not
+ * an arbitrary margin. The notch's flat edge sits exactly ON y=H and the arc
+ * bulges up into the design from there; nothing is ever asked to cut PAST
+ * y=H, which would mean cutting out-of-focus, into the flare.
+ *
+ * Front/back convention (the reason this doesn't need a "which way is front"
+ * setting): the flat design is authored to be VIEWED centred at x = W/2, so
+ * the wall's horizontal centre is the front the viewer sees on a shelf, and
+ * the seam at x = 0/W is the back. The notch sits a few mm off the exact seam
+ * (not on it) — see the placement comment in generate() for why.
  */
 export interface LedHoleSpec {
   enabled: boolean;
   diameterMm: number;
-  /** distance from the hole's centre to the can's bottom edge */
-  marginBottomMm: number;
+}
+
+/** A semicircular notch cut flush with the can's bottom edge (y = H). */
+export interface LedNotch {
+  x: number;
+  r: number;
 }
 
 export interface CanSpec {
@@ -106,6 +124,8 @@ export interface GenerateResult {
   sampleMs: number;
   /** null when the design fits the can exactly and nothing is cropped */
   cropWindow: CropWindow | null;
+  /** null when the LED wire hole is off. Not in `holes` — see LedHoleSpec. */
+  ledNotch: LedNotch | null;
 }
 
 /**
@@ -232,29 +252,28 @@ export function generate(
     holes = designHoles;
   }
 
-  // Rule 2/CLAUDE.md: measured from the real stippled pattern only. The LED
-  // hole is added below, AFTER this — it's a single deliberate through-cut,
-  // not a stipple-tension concern, and its center-to-edge "distance" to
-  // itself would otherwise register as a large negative min-web and paint
-  // the readout red for no real reason.
+  // Rule 2/CLAUDE.md: measured from the real stippled pattern only — the LED
+  // notch is a deliberate through-cut, not a stipple-tension concern, and
+  // isn't in `holes` at all (see below), so this needs no special-casing.
   const minWeb = computeMinWeb(holes, W, Math.max(sampled.pitch * 1.2, 0.5));
   const t2 = performance.now();
 
+  // Kept OUT of `holes`/`designHoles` entirely, on purpose: those feed both
+  // the backlit "Lit" glow render and the min-web calc, and this notch should
+  // do neither. Once assembled, a wire fills it and blocks the light it would
+  // otherwise pass — "it shouldn't light up like that, it will be plugged up
+  // with a wire" — so the glow render must not see it at all, not just render
+  // it dim. main.ts draws `ledNotch` as its own flat, non-glowing shape in the
+  // Unlit/Field previews (where it IS honestly an opening in bare metal) and
+  // leaves it out of the Lit composite. See rule 9 for the notch geometry.
+  let ledNotch: LedNotch | null = null;
   if (can.ledHole?.enabled) {
-    const r = can.ledHole.diameterMm / 2;
-    // A few mm off the exact seam, not on it — so the cut is a single circle
-    // wholly within one edge of the flat sheet rather than needing to
-    // straddle x=0/x=W as two matching half-moons. "Back" only needs to be
-    // unambiguously away from the front (x=W/2); it doesn't need to be the
-    // mathematically exact opposite point.
-    const holeX = Math.min(6, W * 0.05);
-    const holeYInH = Math.max(r + 0.3, H - can.ledHole.marginBottomMm);
-    holes.push({ x: holeX, y: holeYInH, r });
-    // holes === designHoles by reference when there's no crop window (see the
-    // branch above), so that case is already covered by the push above.
-    if (cropWindow) {
-      designHoles.push({ x: holeX, y: cropWindow.fromMm + holeYInH, r });
-    }
+    // A few mm off the exact seam, not on it — "back" only needs to be
+    // unambiguously away from the front (x=W/2), not the mathematically
+    // exact opposite point, and this keeps the notch on one side of the
+    // x=0/W wrap rather than needing to straddle it.
+    const x = Math.min(6, W * 0.05);
+    ledNotch = { x, r: can.ledHole.diameterMm / 2 };
   }
 
   return {
@@ -275,9 +294,10 @@ export function generate(
     buildMs: t1 - t0,
     sampleMs: t2 - t1,
     cropWindow,
+    ledNotch,
   };
 }
 
 export function resultToSvg(r: GenerateResult, title: string): string {
-  return writeSvg(r.holes, r.W, r.H, title);
+  return writeSvg(r.holes, r.W, r.H, title, r.ledNotch);
 }

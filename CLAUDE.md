@@ -169,23 +169,40 @@ a second hero shape or bright element right at the seam, the way you already avo
 stacking two bright elements on top of each other (rule 3b).
 
 **The LED wire hole** (toggle in the UI, `CanSpec.ledHole` in
-[generate.ts](src/engine/generate.ts)) is a single real through-cut sized for a 3mm
-cable — nothing to do with the stippled pattern, and it must stay that way:
+[generate.ts](src/engine/generate.ts)) is a real through-cut sized for a 3mm cable —
+nothing to do with the stippled pattern, and it must stay that way. First version was a
+floating circle centred ~10mm up the wall; corrected on sight, in the user's words:
+*"the led hole should be at the full bottom of can, even be a 'U' shaped cutout. NOT
+THERE."* Current shape (`GenerateResult.ledNotch`, a `{x, r}` — y is implicitly `H`):
 
-- It sits a few mm off the *exact* seam (`x = min(6, W * 0.05)`), not on it. A cut
-  exactly at x=0 would need to be authored as two half-moons, one at each edge of the
-  flat sheet, that only become a full circle after rolling — doable, but a needless way
-  to risk a botched cut on a real can for a feature that only needs to unambiguously
-  read as "the back," not hit 180° exactly.
-- It's pushed into `holes`/`designHoles` **after** `computeMinWeb()` runs, not before.
-  `computeMinWeb` measures the closest edge-to-edge gap between EVERY pair of holes —
-  feed it a deliberate 3.4mm cutout and the "closest pair" becomes the wire hole
-  against itself, reporting a large negative number and painting the readout red for
-  no real reason. The fix is ordering, not a special case in the distance math.
+- **A semicircular notch flush with the bottom edge**, not a closed circle floating
+  mid-wall. The flat side sits exactly on `y = H`, the arc bulges up into the design.
+  This is safe specifically *because* `heightMm` is already the straight-wall section
+  only — CLAUDE.md's own can-section warning about the excluded neck taper and base
+  flare putting the galvo out of focus means `y = H` really is the edge of where it's
+  safe to cut; the notch never asks the laser to go past it. `svg.ts`'s `notchPath()`
+  builds the exact path (`M`/`A`/`Z`); `main.ts`'s `drawLedNotch()` draws the same shape
+  for the previews via `ctx.arc(..., Math.PI, Math.PI*2)`.
+- An open notch is also easier to assemble than a closed hole — the cable lays in
+  sideways rather than being threaded end-first through a small circle.
+- Kept **out of `holes`/`designHoles` entirely** — not just added after
+  `computeMinWeb()` (an earlier fix), but never merged into that array at all. Two
+  independent reasons: (1) `computeMinWeb` measures the closest edge-to-edge gap
+  between every pair of holes, and a deliberate 3.4mm cutout in that list registers as
+  a large negative "closest pair" distance against itself; (2) `holes` also feeds the
+  Lit-mode backlit glow render, and this notch must **not glow** — once assembled a
+  wire fills it and blocks the light, so *"it also shouldn't light up like that, it
+  will be plugged up with a wire."* Being a separate field makes both true by
+  construction instead of by special-casing.
+- Drawn in Unlit/Field previews (where it's honestly an opening in bare metal, wire or
+  not) but skipped entirely when composing the Lit glow texture.
 - Position is computed from the physical can's real height (`H`), never the preset's
   142mm reference frame — see the `fromMm` handling in `generate()`. Without that, the
-  hole would drift relative to the actual bottom edge on any preset being cropped down
-  from its reference height.
+  notch would drift relative to the actual bottom edge on any preset being cropped down
+  from its reference height. Same reasoning as the text annotation below.
+- x sits a few mm off the *exact* seam (`x = min(6, W * 0.05)`), not on it — "back"
+  only needs to be unambiguously away from the front, not the mathematically exact
+  opposite point, and this keeps it on one side of the x=0/W wrap.
 
 The same `fromMm`-aware positioning is what lets **the Personalize text annotation**
 (also in generate.ts) say "bottom" and mean the can's actual bottom, regardless of
