@@ -11,30 +11,40 @@ import { Preset } from './types';
 function car(d: DrawCtx, cx: number, groundY: number, scale: number, facing: 1 | -1) {
   const s = scale * facing;
   // Field's y-axis runs up from the bottom (see fieldkit.ts), but the shape
-  // below is authored with v increasing downward (wheels at v=+0.62, roof at
+  // below is authored with v increasing downward (wheels at v=+0.6, roof at
   // v=-0.42) like a normal screen sketch — negate v to sit it right-side up.
+  //
+  // A retro hood/tailfin profile was tried here and didn't survive stipple
+  // pitch — the fine silhouette detail that makes a profile read as "retro"
+  // is well under rule 3's ~16mm legible-feature floor at this scale, so it
+  // just added noisy bumps rather than character. This version bets on
+  // proportion instead of profile: a plain low body, and a cabin that's
+  // unmistakably narrower and half as tall, wide enough to hold a big dark
+  // window band. That body/cabin/window relationship is what a car icon
+  // reads by, even reduced to three closed shapes.
   const T = (u: number, v: number): [number, number] => [cx + u * s, groundY - v * scale];
 
-  // body: low, wide, rounded-ish via a polygon approximation
+  // body: one smooth low silhouette, bumper to bumper
   poly(
     d,
     [
-      T(-1.0, 0.62), T(-0.92, 0.3), T(-0.6, 0.08), T(-0.34, 0.06),
-      T(-0.26, -0.18), T(0.32, -0.2), T(0.42, 0.04), T(0.7, 0.08),
-      T(0.94, 0.34), T(1.0, 0.62),
+      T(-1.0, 0.6), T(-0.96, 0.24), T(-0.7, 0.03), T(0.7, 0.03),
+      T(0.96, 0.24), T(1.0, 0.6),
     ],
     255
   );
-  // cabin bump
-  poly(d, [T(-0.22, -0.16), T(-0.06, -0.42), T(0.28, -0.42), T(0.4, -0.16)], 255);
-  // dark window band and headlight cut (rule 3: structure inside the solid)
-  poly(d, [T(-0.16, -0.2), T(-0.02, -0.38), T(0.24, -0.38), T(0.34, -0.2)], 0);
-  circle(d, ...T(facing > 0 ? 0.92 : -0.92, 0.32), scale * 0.06, 0);
+  // cabin: wide flat-topped roof, clearly narrower than the body
+  poly(d, [T(-0.5, -0.01), T(-0.32, -0.42), T(0.28, -0.42), T(0.42, -0.01)], 255);
+  // dark window band cut into the cabin (rule 3: structure inside the solid)
+  poly(d, [T(-0.4, -0.06), T(-0.25, -0.34), T(0.2, -0.34), T(0.3, -0.08)], 0);
+  // headlight (front) and taillight (rear)
+  circle(d, ...T(-0.97, 0.32), scale * 0.07, 0);
+  circle(d, ...T(0.97, 0.32), scale * 0.06, 0);
   // wheels
-  circle(d, ...T(-0.55, 0.62), scale * 0.24, 255);
-  circle(d, ...T(-0.55, 0.62), scale * 0.1, 0);
-  circle(d, ...T(0.58, 0.62), scale * 0.24, 255);
-  circle(d, ...T(0.58, 0.62), scale * 0.1, 0);
+  circle(d, ...T(-0.56, 0.6), scale * 0.24, 255);
+  circle(d, ...T(-0.56, 0.6), scale * 0.1, 0);
+  circle(d, ...T(0.56, 0.6), scale * 0.24, 255);
+  circle(d, ...T(0.56, 0.6), scale * 0.1, 0);
 }
 
 function build(ctx: FieldCtx): Float32Array {
@@ -115,7 +125,7 @@ function build(ctx: FieldCtx): Float32Array {
 
 export const roadster: Preset = {
   id: 'roadster',
-  name: 'Roadster',
+  name: 'Night Drive',
   group: 'urban',
   description: 'Retro cars cruising a night road under a big moon and scattered stars.',
   stipple: { pitchMm: 1.3, dMin: 0.26, dMax: 0.5, jitter: 0.11, thresh: 0.07, mode: 'hybrid', knee: 0.42, gamma: 0.65 },

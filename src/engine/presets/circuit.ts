@@ -1,10 +1,13 @@
 // "Circuit" — printed-circuit board.
 //
-// Redesigned for legibility: clean orthogonal (Manhattan) traces instead of
-// diagonal doglegs, fewer but bigger DIP-style chips with a real pin row on
-// each side, and bigger annular vias — all with generous moats so the board
-// reads as an object at a glance rather than dissolving into grain.
-import { FieldCtx, clamp01, maxInto, subtractInto, rim, heroSize, motifCount } from '../fieldkit';
+// Second redo. The first pass ("clean orthogonal traces instead of diagonal
+// doglegs") fixed the ROUTING but not the failure rule 3 already predicts:
+// a trace drawn as a 1mm stroked line is filigree, and filigree dissolves at
+// stipple pitch — the board came out as a sparse dotted grid, not a circuit.
+// This version draws traces as solid bars (rule 3: a closed form, not an
+// outline) with a real pad at every junction and stub landing, composited
+// through the same moat() tier chips and vias already used.
+import { FieldCtx, clamp01, maxInto, heroSize, motifCount } from '../fieldkit';
 import { rect, circle, thickline, band, DrawCtx } from '../draw';
 import { mulberry32 } from '../rng';
 import { Preset } from './types';
@@ -38,20 +41,33 @@ function build(ctx: FieldCtx): Float32Array {
     });
   }
 
-  // --- orthogonal bus grid: a handful of full runs, horizontal + vertical ---
+  // --- orthogonal bus grid: a handful of full runs, horizontal + vertical.
+  // Traces are drawn WIDE, as solid bars rather than stroked lines — a thin
+  // line has no closed form anywhere in it and dissolves at stipple pitch,
+  // which is exactly why the previous version of this preset didn't read as
+  // a circuit at all (see the lesson recorded in clockwork.ts, which this
+  // never actually applied to itself). A pad at every bus junction and stub
+  // landing reinforces the read and covers the corner where two thick
+  // strokes meet.
+  const traceW = 3.2;
   const hBuses = [0.2, 0.4, 0.62, 0.83].map((f) => yLo + f * (yHi - yLo));
   const vBusCount = motifCount(W, 51, 2);
   const vBuses = Array.from({ length: vBusCount }, (_, k) => ((k + 0.35) / vBusCount) * W);
 
   const traceMask = ctx.mask((d: DrawCtx) => {
-    for (const y of hBuses) thickline(d, [[0, y], [W, y]], 1.0, 255);
-    for (const x of vBuses) thickline(d, [[x, yLo], [x, yHi]], 1.0, 255);
-    // short orthogonal stubs connecting chips to the nearest bus
+    for (const y of hBuses) thickline(d, [[0, y], [W, y]], traceW, 255);
+    for (const x of vBuses) thickline(d, [[x, yLo], [x, yHi]], traceW, 255);
+    for (const x of vBuses) for (const y of hBuses) circle(d, x, y, traceW * 0.62, 255);
+    // short orthogonal stubs connecting chips to the nearest bus, padded at
+    // the bend and at the landing point
     for (const c of chips) {
       for (const side of [-1, 1] as const) {
         const x = c.cx + (side * c.w) / 2;
         const nearestBus = hBuses.reduce((a, b) => (Math.abs(b - c.cy) < Math.abs(a - c.cy) ? b : a));
-        thickline(d, [[x, c.cy], [x + side * 6.1, c.cy], [x + side * 6.1, nearestBus]], 0.9, 255);
+        const bendX = x + side * 6.1;
+        thickline(d, [[x, c.cy], [bendX, c.cy], [bendX, nearestBus]], traceW * 0.75, 255);
+        circle(d, bendX, c.cy, traceW * 0.5, 255);
+        circle(d, bendX, nearestBus, traceW * 0.55, 255);
       }
     }
   });
@@ -67,7 +83,7 @@ function build(ctx: FieldCtx): Float32Array {
       const y = yLo + ((j + 0.5 + (rng() - 0.5) * 0.4) / rows) * (yHi - yLo);
       const insideChip = chips.some((c) => Math.abs(ctx.dx(c.cx, x)) < c.w * 0.68 && Math.abs(y - c.cy) < c.h * 0.68);
       if (insideChip || rng() > 0.38) continue;
-      vias.push([x, y, 1.3 + rng() * 1.0]);
+      vias.push([x, y, 1.6 + rng() * 1.1]);
     }
   }
   const padMask = ctx.mask((d: DrawCtx) => {
@@ -106,9 +122,7 @@ function build(ctx: FieldCtx): Float32Array {
 
   let F = ctx.blank(0);
   F = ctx.dimTexture(F, grid, 0.09);
-  subtractInto(F, rim(ctx, traceMask, 1.0), 0.85);
-  maxInto(F, (() => { const t = traceMask.slice(); for (let i = 0; i < t.length; i++) t[i] *= 0.68; return t; })());
-
+  F = ctx.moat(F, traceMask, 2.2, 1.0);
   F = ctx.moat(F, padMask, 1.8, 0.9);
   F = ctx.moat(F, chipMask, 3.6, 1.0);
 

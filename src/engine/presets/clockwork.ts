@@ -94,19 +94,8 @@ function build(ctx: FieldCtx): Float32Array {
       phase: 0.2 + k,
     });
   }
-  // a third tier of tiny wheels along the top and bottom edges
-  const smalls: Gear[] = [];
-  const m = motifCount(W, 27, 3);
-  for (let k = 0; k < m; k++) {
-    smalls.push({ cx: ((k + 0.25) / m) * W, cy: yLo + 8.5, R: bigR * 0.3, teeth: 8, spokes: 3, phase: 0.5 * k });
-    smalls.push({ cx: ((k + 0.75) / m) * W, cy: yHi - 8.5, R: bigR * 0.3, teeth: 8, spokes: 3, phase: 1.1 * k });
-  }
-
   const wheels = ctx.mask((d: DrawCtx) => {
     for (const g of gears) gear(d, g);
-  });
-  const idlers = ctx.mask((d: DrawCtx) => {
-    for (const g of smalls) gear(d, g);
   });
 
   // --- dim plate texture behind the train (rule 7) ---
@@ -145,7 +134,6 @@ function build(ctx: FieldCtx): Float32Array {
   let F = ctx.blank(0);
   F = ctx.dimTexture(F, plate, 0.15);
   F = ctx.moat(F, screws, 1.2, 0.62);
-  F = ctx.moat(F, idlers, 2.0, 0.82);
   F = ctx.moat(F, wheels, 2.8, 1.0);
 
   for (let row = 0; row < ctx.Hp; row++) {
