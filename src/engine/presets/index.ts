@@ -10,7 +10,6 @@ import { orrery } from './orrery';
 import { seigaiha } from './seigaiha';
 import { metropolis } from './metropolis';
 import { horizon } from './horizon';
-import { current } from './current';
 import { roadster } from './roadster';
 
 export * from './types';
@@ -20,7 +19,6 @@ export const PRESETS: Preset[] = [
   escarcha,
   alpenglow,
   horizon,
-  current,
   abyss,
   seigaiha,
   girih,

@@ -10,7 +10,10 @@ import { Preset } from './types';
 
 function car(d: DrawCtx, cx: number, groundY: number, scale: number, facing: 1 | -1) {
   const s = scale * facing;
-  const T = (u: number, v: number): [number, number] => [cx + u * s, groundY + v * scale];
+  // Field's y-axis runs up from the bottom (see fieldkit.ts), but the shape
+  // below is authored with v increasing downward (wheels at v=+0.62, roof at
+  // v=-0.42) like a normal screen sketch — negate v to sit it right-side up.
+  const T = (u: number, v: number): [number, number] => [cx + u * s, groundY - v * scale];
 
   // body: low, wide, rounded-ish via a polygon approximation
   poly(
