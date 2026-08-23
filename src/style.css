@@ -418,6 +418,12 @@ input[type="range"].vslider {
   .preview-canvas-wrap::-webkit-scrollbar-track { background: #0a0b0d; }
   .preview-canvas-wrap::-webkit-scrollbar-thumb { background: #454d5b; border-radius: 5px; }
 
+  /* The flat/unwrapped pane is forced off here (see effectiveViewMode in
+     main.ts): at 4.6 px/mm only about a third of the wrap fits a phone, so it
+     was all panning and no overview. With only the 3D can left, the
+     Both/Flat/3D toggle has nothing to switch between. */
+  .preview-toolbar { display: none; }
+
   .rotate-row { max-width: none; }
 }
 

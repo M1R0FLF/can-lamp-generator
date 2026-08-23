@@ -343,37 +343,59 @@ function overlayCrop(canvas: HTMLCanvasElement, r: GenerateResult, sp: number) {
   ctx.restore();
 }
 
+/** Narrow, single-column layout — same breakpoint the control panels use. */
+const STACKED_QUERY = '(max-width: 900px)';
+const isStacked = () => window.matchMedia(STACKED_QUERY).matches;
+
+/**
+ * Which preview panes to actually show.
+ *
+ * On the stacked (phone) layout the flat/unwrapped view is forced off: at the
+ * fixed FLAT_SP of 4.6 px/mm only about a third of the wrap fits on a phone
+ * screen, so it is all panning and no overview — not worth the space. The 3D
+ * can reads fine at that width, so a phone gets the can only, whatever
+ * `state.viewMode` happens to hold from a wider session.
+ */
+function effectiveViewMode(): ViewMode {
+  return isStacked() ? 'can' : state.viewMode;
+}
+
 function renderPreviews() {
   if (!result) return;
   const r = result;
   const tiles = state.tile2x ? 2 : 1;
   const sp = FLAT_SP;
   const pane = document.querySelector('main.preview') as HTMLElement | null;
+  const view = effectiveViewMode();
 
-  // When cropping, the flat view shows the WHOLE design (so you can see what
-  // you're choosing between) with the discarded bands dimmed. Otherwise it
-  // shows the can content directly.
-  const cropping = !!r.cropWindow;
-  const flatHoles = cropping ? r.designHoles : r.holes;
-  const flatH = cropping ? r.designH : r.H;
+  // Skip the flat raster entirely when nothing will show it — renderGlow over
+  // the whole wrap is the most expensive thing here.
+  if (view !== 'can') {
+    // When cropping, the flat view shows the WHOLE design (so you can see what
+    // you're choosing between) with the discarded bands dimmed. Otherwise it
+    // shows the can content directly.
+    const cropping = !!r.cropWindow;
+    const flatHoles = cropping ? r.designHoles : r.holes;
+    const flatH = cropping ? r.designH : r.H;
 
-  let flat: HTMLCanvasElement;
-  if (state.previewMode === 'lit') {
-    flat = renderGlow(dotsCanvas(flatHoles, r.W, flatH, sp, tiles), sp);
-  } else if (state.previewMode === 'unlit') {
-    flat = unlitCanvas(flatHoles, r.W, flatH, sp, tiles);
-  } else {
-    flat = fieldCanvas(r, sp, tiles);
+    let flat: HTMLCanvasElement;
+    if (state.previewMode === 'lit') {
+      flat = renderGlow(dotsCanvas(flatHoles, r.W, flatH, sp, tiles), sp);
+    } else if (state.previewMode === 'unlit') {
+      flat = unlitCanvas(flatHoles, r.W, flatH, sp, tiles);
+    } else {
+      flat = fieldCanvas(r, sp, tiles);
+    }
+
+    const flatCanvas = el<HTMLCanvasElement>('flatCanvas');
+    flatCanvas.width = flat.width;
+    flatCanvas.height = flat.height;
+    flatCanvas.getContext('2d')!.drawImage(flat, 0, 0);
+    overlayCrop(flatCanvas, r, sp);
+
+    // keep the rail's track the same height as the preview it annotates
+    el('cropRail').style.height = `${flat.height}px`;
   }
-
-  const flatCanvas = el<HTMLCanvasElement>('flatCanvas');
-  flatCanvas.width = flat.width;
-  flatCanvas.height = flat.height;
-  flatCanvas.getContext('2d')!.drawImage(flat, 0, 0);
-  overlayCrop(flatCanvas, r, sp);
-
-  // keep the rail's track the same height as the preview it annotates
-  el('cropRail').style.height = `${flat.height}px`;
 
   // the 3D view always wraps a single (untiled) copy, at its own resolution
   const texSp = Math.max(3, Math.min(6, 700 / r.W));
@@ -388,7 +410,7 @@ function renderPreviews() {
     // 250px covers the toolbar, block heading, rotate row, hint and padding
     // that sit around the stage, so "3D only" fits without a scrollbar
     const paneH = pane?.clientHeight ?? 600;
-    const maxHeightPx = state.viewMode === 'can' ? Math.max(260, paneH - 250) : 520;
+    const maxHeightPx = view === 'can' ? Math.max(260, paneH - 250) : 520;
     can3d.update({
       texture,
       lit,
@@ -401,8 +423,12 @@ function renderPreviews() {
 }
 
 function applyViewMode() {
-  el('flatBlock').style.display = state.viewMode === 'can' ? 'none' : 'block';
-  el('canBlock').style.display = state.viewMode === 'flat' ? 'none' : 'block';
+  const view = effectiveViewMode();
+  el('flatBlock').style.display = view === 'can' ? 'none' : 'block';
+  el('canBlock').style.display = view === 'flat' ? 'none' : 'block';
+  // The Both/Flat/3D toggle is meaningless when the flat pane is forced off, so
+  // the stacked layout hides it (CSS) — keep the buttons in sync regardless, so
+  // the right one is lit when the window widens again.
   for (const b of el('viewSeg').querySelectorAll('button')) {
     b.classList.toggle('active', (b as HTMLElement).dataset.view === state.viewMode);
   }
@@ -1075,13 +1101,20 @@ window.addEventListener('resize', debounce(() => {
 // sections they replaced (the CSS also makes their headings inert there).
 // Narrow layout: only the panels marked data-mobile="open" start expanded.
 {
-  const stacked = window.matchMedia('(max-width: 900px)');
+  const stacked = window.matchMedia(STACKED_QUERY);
   const panels = document.querySelectorAll<HTMLDetailsElement>('details.ctrl');
   const applyPanelDefaults = () => {
     for (const d of panels) d.open = stacked.matches ? d.dataset.mobile === 'open' : true;
   };
   applyPanelDefaults();
-  stacked.addEventListener('change', applyPanelDefaults);
+  stacked.addEventListener('change', () => {
+    applyPanelDefaults();
+    // Crossing the breakpoint flips whether the flat pane exists at all
+    // (effectiveViewMode), so the panes and the 3D can's height both need
+    // recomputing — and the flat raster has to be built if it just came back.
+    applyViewMode();
+    renderPreviews();
+  });
 }
 
 // ---------- export ----------
