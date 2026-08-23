@@ -845,11 +845,15 @@ function attachPaletteDrag(btn: HTMLElement, shapeId: string) {
       ghost.style.left = `${ev.clientX}px`;
       ghost.style.top = `${ev.clientY}px`;
     };
-    const up = (ev: PointerEvent) => {
+    const cleanup = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cleanup);
       btn.classList.remove('dragging');
       ghost.remove();
+    };
+    const up = (ev: PointerEvent) => {
+      cleanup();
       const rect = editorCanvas.getBoundingClientRect();
       const inside =
         ev.clientX >= rect.left && ev.clientX <= rect.right &&
@@ -865,6 +869,7 @@ function attachPaletteDrag(btn: HTMLElement, shapeId: string) {
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cleanup);
   });
 }
 
@@ -1063,6 +1068,21 @@ window.addEventListener('resize', debounce(() => {
   if (state.sourceKind === 'custom') renderEditor();
   renderPreviews();
 }, 150));
+
+// ---------- responsive control panels ----------
+// The panels are <details> so a phone doesn't get one endless scroll wall.
+// Wide layout: force every panel open, so they behave exactly like the plain
+// sections they replaced (the CSS also makes their headings inert there).
+// Narrow layout: only the panels marked data-mobile="open" start expanded.
+{
+  const stacked = window.matchMedia('(max-width: 900px)');
+  const panels = document.querySelectorAll<HTMLDetailsElement>('details.ctrl');
+  const applyPanelDefaults = () => {
+    for (const d of panels) d.open = stacked.matches ? d.dataset.mobile === 'open' : true;
+  };
+  applyPanelDefaults();
+  stacked.addEventListener('change', applyPanelDefaults);
+}
 
 // ---------- export ----------
 el<HTMLButtonElement>('exportBtn').addEventListener('click', () => {

@@ -41,10 +41,10 @@ aside.controls {
   overflow-y: auto;
 }
 
-section.ctrl { margin-bottom: 16px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
-section.ctrl:last-child { border-bottom: none; padding-bottom: 0; }
+.ctrl { margin-bottom: 16px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
+.ctrl:last-child { border-bottom: none; padding-bottom: 0; }
 
-section.ctrl h2, details.advanced summary {
+.ctrl > h2, .ctrl > summary, details.advanced > summary {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -53,7 +53,20 @@ section.ctrl h2, details.advanced summary {
   font-weight: 600;
 }
 details.advanced { margin-bottom: 16px; padding-bottom: 13px; border-bottom: 1px solid var(--border); }
-details.advanced summary { cursor: pointer; }
+details.advanced > summary { cursor: pointer; }
+
+/* Wide screens: the panel <details> are indistinguishable from the plain
+   <section>s they replaced — no disclosure marker and an inert heading. They
+   only become collapsible once the layout stacks (see the media queries). */
+@media (min-width: 901px) {
+  details.ctrl > summary {
+    pointer-events: none;
+    list-style: none;
+    display: block;
+  }
+  details.ctrl > summary::-webkit-details-marker { display: none; }
+  details.ctrl > summary::marker { content: ""; }
+}
 
 .tag {
   color: var(--accent);
@@ -191,6 +204,12 @@ button.secondary:hover { color: var(--danger); border-color: var(--danger); }
   align-items: center;
   justify-content: center;
   padding: 0;
+  /* the stamp drag is driven by pointer events, so the browser must not claim
+     the gesture as a scroll on touch — without this a touch-drag is cancelled
+     mid-flight. A plain tap still places the stamp centred. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 .palette button:hover { border-color: var(--accent); }
 .palette button.dragging { opacity: 0.4; }
@@ -301,7 +320,12 @@ input[type="range"].vslider {
   accent-color: var(--accent);
   cursor: ns-resize;
 }
-#flatCanvas.croppable { cursor: ns-resize; }
+/* pan-x, not none: a horizontal swipe still scrolls the (wider-than-screen)
+   canvas inside its wrapper, while vertical drags reach the crop handler
+   instead of being swallowed as a page scroll. */
+#flatCanvas.croppable { cursor: ns-resize; touch-action: pan-x; }
+
+.scroll-hint { display: none; font-size: 11px; color: var(--text-dim); }
 
 .rotate-row { display: flex; align-items: center; gap: 10px; margin-top: 7px; max-width: 420px; }
 .rotate-row input[type="range"] { flex: 1; }
@@ -343,4 +367,133 @@ input[type="range"].vslider {
   inset: 0;
   pointer-events: none;
   background: linear-gradient(90deg, rgba(0,0,0,0.5), transparent 18%, transparent 82%, rgba(0,0,0,0.5));
+}
+
+/* ============================================================
+   Stacked layout (< 900px)
+
+   The desktop shell is two independent scroll regions inside a
+   non-scrolling body. That falls apart once the panes stack, so below
+   900px the body becomes the single scroller and both panes are
+   auto-height. The control panels turn into real collapsible
+   <details> here (main.ts sets which ones start open).
+   ============================================================ */
+@media (max-width: 900px) {
+  body {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  header { padding: 10px 14px; }
+
+  .layout { flex-direction: column; align-items: stretch; }
+
+  aside.controls {
+    width: auto;
+    flex: none;
+    padding: 12px 14px 14px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow: visible;
+  }
+
+  main.preview {
+    flex: none;
+    padding: 12px 14px 32px;
+    overflow: visible;
+  }
+
+  details.ctrl > summary { cursor: pointer; }
+
+  /* the shape editor sizes itself from its wrapper, and the wrapper is
+     width:fit-content — which pins it to the canvas's own initial width.
+     Stacked, the column is wide enough to be worth filling. */
+  #editorWrap { width: 100%; }
+
+  /* the canvas is wider than the screen; make its scrollbar visible rather
+     than leaving the pan gesture undiscoverable */
+  .preview-canvas-wrap { scrollbar-color: #454d5b transparent; }
+  .preview-canvas-wrap::-webkit-scrollbar { height: 9px; width: 9px; }
+  .preview-canvas-wrap::-webkit-scrollbar-track { background: #0a0b0d; }
+  .preview-canvas-wrap::-webkit-scrollbar-thumb { background: #454d5b; border-radius: 5px; }
+
+  .rotate-row { max-width: none; }
+}
+
+/* ============================================================
+   Phone (< 600px): comfortable tap targets, 16px form text so iOS
+   doesn't zoom on focus, and Export pinned to the bottom.
+   ============================================================ */
+@media (max-width: 600px) {
+  header h1 { font-size: 14px; }
+  header p { font-size: 11px; }
+
+  /* 44px rows, marker kept (summary stays display:list-item) */
+  details.ctrl > summary, details.advanced > summary {
+    padding: 13px 2px;
+    margin: 0 0 2px;
+    font-size: 11.5px;
+    line-height: 18px;
+  }
+  details.ctrl[open] > summary, details.advanced[open] > summary { margin-bottom: 7px; }
+  .ctrl > h2 { padding: 10px 2px; margin: 0 0 2px; line-height: 18px; }
+
+  input[type="number"], select {
+    font-size: 16px;
+    padding: 10px 9px;
+    min-height: 44px;
+  }
+  input[type="range"] { height: 40px; }
+  input[type="range"].vslider { width: 34px; height: auto; }
+
+  .segmented button { min-height: 44px; font-size: 12.5px; }
+  .segmented.small button { min-height: 40px; padding: 0 13px; font-size: 12px; }
+
+  button.primary { padding: 13px; font-size: 14px; min-height: 46px; }
+  button.secondary { min-height: 44px; font-size: 12.5px; }
+
+  .cat-tabs { gap: 6px; }
+  .cat-tabs button { font-size: 12px; padding: 12px; line-height: 18px; }
+
+  .palette {
+    grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+    gap: 7px;
+    max-height: 210px;
+  }
+  .palette button { font-size: 23px; }
+
+  .toolrow { gap: 6px; margin-top: 10px; }
+  .toolrow button { min-width: 44px; height: 44px; font-size: 17px; }
+  .toolrow input[type="number"] { width: 68px; height: 44px; }
+  .toolgroup-label { width: 100%; font-size: 10px; }
+
+  .readout { font-size: 13px; row-gap: 8px; }
+
+  .tilecheck { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 12px; }
+  .tilecheck input { width: 20px; height: 20px; }
+
+  .scroll-hint { display: block; }
+  .flat-foot { gap: 8px; }
+  .preview-block .head { flex-wrap: wrap; gap: 8px; }
+  .preview-toolbar { margin-bottom: 12px; }
+
+  /* Export follows you down the page — the alternative is a scroll back up
+     through every panel to reach the one button that produces output. */
+  .export-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    margin: 0;
+    padding: 9px 14px calc(9px + env(safe-area-inset-bottom, 0px));
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    border-bottom: none;
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.45);
+  }
+  /* room for the fixed bar at the very bottom of the page */
+  main.preview { padding-bottom: 84px; }
+  aside.controls { padding-bottom: 4px; }
 }
