@@ -113,10 +113,19 @@ export interface GenerateResult {
  * pair, measured in the PHYSICAL can's own height — not the preset reference
  * frame. So "bottom" means the bottom of the can the user actually has,
  * regardless of any 142mm-reference cropping going on underneath it.
+ *
+ * `label()` draws centred on this y (canvas textBaseline='middle'), so 'top'
+ * and 'bottom' must inset by half the letter height — otherwise offset=0
+ * puts the text's own CENTRE exactly on the can's edge and half of every
+ * letter renders past it, off the printable area. Caught by the user on
+ * first use: "why would the text be half off the screen... top and bottom
+ * aren't functional." 'center' doesn't need the inset; offset is already
+ * relative to the vertical middle, not an edge.
  */
-function anchoredY(H: number, anchor: AnnotationSpec['yAnchor'], offsetMm: number): number {
-  if (anchor === 'top') return H - offsetMm;
-  if (anchor === 'bottom') return offsetMm;
+function anchoredY(H: number, anchor: AnnotationSpec['yAnchor'], offsetMm: number, sizeMm: number): number {
+  const inset = sizeMm * 0.55; // slightly over half: clears typical ascender/descender, not just cap-height
+  if (anchor === 'top') return H - offsetMm - inset;
+  if (anchor === 'bottom') return offsetMm + inset;
   return H / 2 + offsetMm;
 }
 
@@ -196,7 +205,7 @@ export function generate(
     field = buildPhotoField(source.source, ctx, source.params, params.pitchMm).field;
   }
   if (annotation && annotation.text.trim()) {
-    const cy = fromMm + anchoredY(H, annotation.yAnchor, annotation.yOffsetMm);
+    const cy = fromMm + anchoredY(H, annotation.yAnchor, annotation.yOffsetMm, annotation.sizeMm);
     field = applyAnnotation(ctx, field, annotation, cy, params.pitchMm);
   }
   const t1 = performance.now();
