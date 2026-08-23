@@ -251,7 +251,7 @@ const GEOMETRIC: ShapeDef[] = [
     id: 'octagon',
     name: 'Octagon',
     category: 'geometric',
-    glyph: '🛑',
+    glyph: '⬣',
     defaultSizeMm: 13,
     draw(d, cx, cy, size, rotation) {
       ngon(d, cx, cy, size, 8, rotation + 22.5, 255);
@@ -350,7 +350,7 @@ const GEOMETRIC: ShapeDef[] = [
     id: 'spiral',
     name: 'Spiral',
     category: 'geometric',
-    glyph: '🌀',
+    glyph: '@',
     defaultSizeMm: 15,
     draw(d, cx, cy, size, rotation) {
       // Archimedean: 2.2 turns, radial advance 0.38R per turn, so the dark gap
@@ -510,7 +510,7 @@ const DECOR: ShapeDef[] = [
     id: 'wreath',
     name: 'Laurel ring',
     category: 'decor',
-    glyph: '🌿',
+    glyph: '❧',
     defaultSizeMm: 16,
     draw(d, cx, cy, size, rotation) {
       const n = 12;

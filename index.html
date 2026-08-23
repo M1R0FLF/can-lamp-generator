@@ -48,8 +48,10 @@
         </div>
         <p class="hint" id="ledHoleHint" style="display:none;">
           Assumes the can stands with this design facing forward — the flat design's
-          centre, below, is the <b>front</b>. The hole is cut low on the wall near the
-          seam, i.e. the <b>back</b>, sized for a 3mm cable (adjustable in Advanced).
+          centre, below, is the <b>front</b>. Cuts a semicircular notch flush with the
+          <b>bottom edge</b> of the wall, near the seam (the <b>back</b>), sized for a
+          3mm cable — open at the edge so the cable lays in rather than threading
+          through a closed hole. Diameter adjustable in Advanced.
         </p>
       </details>
 
@@ -104,38 +106,16 @@
         <summary>Shapes</summary>
         <div class="cat-tabs" id="catTabs"></div>
         <div class="palette" id="palette"></div>
-        <p class="hint">Drag a shape onto the canvas — or just tap it to drop one in
-          the middle. Tap to select, shift-click to add.
-          Arrow keys nudge; <b>Delete</b> removes.</p>
+        <p class="hint">Drag a shape onto the canvas below, or tap it to drop one in the middle.</p>
 
         <div class="preview-canvas-wrap" id="editorWrap">
           <canvas id="editorCanvas"></canvas>
         </div>
 
-        <div class="toolrow" id="toolrow">
-          <span class="toolgroup-label">Align</span>
-          <button data-align="left" title="Align left edge">⇤</button>
-          <button data-align="centerX" title="Align centres horizontally">↔</button>
-          <button data-align="right" title="Align right edge">⇥</button>
-          <button data-align="bottom" title="Align bottoms">⇩</button>
-          <button data-align="middleY" title="Align middles vertically">↕</button>
-          <button data-align="top" title="Align tops">⇧</button>
-        </div>
-        <div class="toolrow">
-          <span class="toolgroup-label">Arrange</span>
-          <button data-tool="distributeAround" title="Space evenly around the can">⋯</button>
-          <button data-tool="distributeVertical" title="Space evenly vertically">⁝</button>
-          <button data-tool="mirrorH" title="Mirror horizontally">◫</button>
-          <button data-tool="mirrorV" title="Mirror vertically">⬓</button>
-          <button data-tool="duplicate" title="Duplicate">⧉</button>
-        </div>
-        <div class="toolrow">
-          <span class="toolgroup-label">Ring</span>
-          <input type="number" id="ringCount" min="2" max="48" step="1" value="6" />
-          <button data-tool="ringArray" title="Repeat evenly around the circumference">Repeat around</button>
-        </div>
+        <p class="hint sel-status" id="selInfo"></p>
 
-        <div id="shapeProps" style="display:none;margin-top:9px;">
+        <div id="shapeProps" style="display:none;">
+          <div class="toolgroup-label">Selected shape</div>
           <div class="row2">
             <div class="field">
               <label>Size <span class="val" id="shapeSizeVal"></span></label>
@@ -147,11 +127,45 @@
             </div>
           </div>
         </div>
-        <div class="row2" style="margin-top:8px;">
-          <button class="secondary" id="deleteShape">Delete</button>
+
+        <div class="tool-group">
+          <div class="toolgroup-label">Align <span class="toolgroup-hint">needs 2+ shapes</span></div>
+          <div class="toolrow">
+            <button data-align="left" title="Align left edges">⇤ Left</button>
+            <button data-align="centerX" title="Align horizontal centers">↔ Center</button>
+            <button data-align="right" title="Align right edges">⇥ Right</button>
+            <button data-align="top" title="Align tops">⇧ Top</button>
+            <button data-align="middleY" title="Align vertical middles">↕ Middle</button>
+            <button data-align="bottom" title="Align bottoms">⇩ Bottom</button>
+          </div>
+        </div>
+
+        <div class="tool-group">
+          <div class="toolgroup-label">Arrange</div>
+          <div class="toolrow">
+            <button data-tool="distributeAround" title="Space evenly around the can — needs 2+ shapes">⋯ Space around</button>
+            <button data-tool="distributeVertical" title="Space evenly top to bottom — needs 3+ shapes">⁝ Space vertically</button>
+            <button data-tool="mirrorH" title="Flip left-right">◫ Flip ↔</button>
+            <button data-tool="mirrorV" title="Flip top-bottom">⬓ Flip ↕</button>
+            <button data-tool="duplicate" title="Duplicate">⧉ Duplicate</button>
+          </div>
+        </div>
+
+        <div class="tool-group">
+          <div class="toolgroup-label">Repeat in a ring <span class="toolgroup-hint">needs 1+ shapes</span></div>
+          <div class="field">
+            <label>Copies around the can</label>
+            <div class="ring-row">
+              <input type="number" id="ringCount" min="2" max="48" step="1" value="6" />
+              <button data-tool="ringArray" title="Repeat the selection evenly around the circumference">Repeat around</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="row2" style="margin-top:10px;">
+          <button class="secondary" id="deleteShape">Delete selected</button>
           <button class="secondary" id="clearShapes">Clear all</button>
         </div>
-        <p class="hint" id="selInfo"></p>
       </details>
 
       <details class="ctrl" open data-mobile="open">
@@ -233,18 +247,12 @@
           </div>
         </div>
         <p class="hint">Cut-time estimate calibrated against two real xTool 20W fiber + rotary jobs — rough, ±10%. Match speed/passes to your actual job for a same-ballpark estimate.</p>
-        <div class="row2">
-          <div class="field">
-            <label>LED hole Ø (mm) <span class="val" id="ledHoleDiameterVal"></span></label>
-            <input type="number" id="ledHoleDiameter" min="1" max="10" step="0.1" />
-          </div>
-          <div class="field">
-            <label>LED hole margin (mm) <span class="val" id="ledHoleMarginVal"></span></label>
-            <input type="number" id="ledHoleMargin" min="2" max="60" step="0.5" />
-          </div>
+        <div class="field">
+          <label>LED wire notch Ø (mm) <span class="val" id="ledHoleDiameterVal"></span></label>
+          <input type="number" id="ledHoleDiameter" min="1" max="10" step="0.1" />
         </div>
-        <p class="hint">Margin is measured from the hole's centre to the can's bottom
-          edge. Only cut when the LED wire hole toggle (in <b>Can</b>) is on.</p>
+        <p class="hint">Diameter of the semicircular notch, flush with the wall's
+          bottom edge. Only cut when the LED wire hole toggle (in <b>Can</b>) is on.</p>
       </details>
 
       <details class="ctrl" open data-mobile="open">
@@ -273,16 +281,16 @@
           <button data-view="flat">Flat only</button>
           <button data-view="can">3D only</button>
         </div>
+        <div class="segmented small">
+          <button data-preview="lit" class="active">Lit</button>
+          <button data-preview="unlit">Unlit</button>
+          <button data-preview="field">Field</button>
+        </div>
       </div>
 
       <div class="preview-block" id="flatBlock">
         <div class="head">
           <h3>Flat / unwrapped</h3>
-          <div class="segmented small">
-            <button data-preview="lit" class="active">Lit</button>
-            <button data-preview="unlit">Unlit</button>
-            <button data-preview="field">Field</button>
-          </div>
         </div>
         <div class="flat-row">
           <div class="preview-canvas-wrap">
