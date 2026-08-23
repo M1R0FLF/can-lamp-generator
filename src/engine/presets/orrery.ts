@@ -17,7 +17,7 @@ function build(ctx: FieldCtx): Float32Array {
 
   const planetX = 0.28 * W;
   const planetY = 78;
-  const planetR = heroSize(W, H, 23.5, 0.28, 0.24);
+  const planetR = heroSize(W, H, 29, 0.3, 0.26);
 
   let F = ctx.blank(0);
 
@@ -54,19 +54,43 @@ function build(ctx: FieldCtx): Float32Array {
     })
   );
 
-  // --- constellation: bright nodes joined by thin lines ---
-  const nodeCount = motifCount(W, 7.2, 5);
+  // --- constellation: bright nodes joined by a minimum-spanning tree ---
+  // A real constellation figure has ~6-9 stars, not several dozen — the old
+  // `motifCount(W, 7.2, 5)` treated node spacing like a repeating motif
+  // footprint and produced 20+ nodes on a normal can, which is what made
+  // this read as a scribble instead of a figure. Nearest-neighbour MST
+  // growth (Prim's) replaces the old "connect in placement order" pass,
+  // which drew arbitrary crossing lines with no relation to which stars
+  // were actually close together.
+  const nodeCount = motifCount(W, 34, 5);
   const nodes: Array<[number, number]> = [];
   for (let k = 0; k < nodeCount; k++) {
-    nodes.push([0.5 * W + rng() * 0.46 * W, yLo + 21 + rng() * Math.max(12, yHi - yLo - 34)]);
+    nodes.push([0.5 * W + rng() * 0.42 * W, yLo + 18 + rng() * Math.max(12, yHi - yLo - 30)]);
+  }
+  const edges: Array<[number, number]> = [];
+  const inTree = new Set<number>([0]);
+  while (inTree.size < nodes.length) {
+    let bestFrom = -1;
+    let bestTo = -1;
+    let bestD = Infinity;
+    for (const i of inTree) {
+      for (let j = 0; j < nodes.length; j++) {
+        if (inTree.has(j)) continue;
+        const ddx = ctx.dx(nodes[i][0], nodes[j][0]);
+        const ddy = nodes[i][1] - nodes[j][1];
+        const d = ddx * ddx + ddy * ddy;
+        if (d < bestD) {
+          bestD = d;
+          bestFrom = i;
+          bestTo = j;
+        }
+      }
+    }
+    edges.push([bestFrom, bestTo]);
+    inTree.add(bestTo);
   }
   const constellation = ctx.mask((d: DrawCtx) => {
-    for (let k = 0; k < nodes.length - 1; k++) {
-      const a = nodes[k];
-      const b = nodes[k + 1];
-      if (Math.abs(ctx.dx(a[0], b[0])) > 0.2 * W) continue;
-      thickline(d, [a, b], 0.6, 255);
-    }
+    for (const [i, j] of edges) thickline(d, [nodes[i], nodes[j]], 0.6, 255);
     for (const [x, y] of nodes) circle(d, x, y, 1.5 + rng() * 1.1, 255);
   });
   F = ctx.moat(F, constellation, 1.5, 0.95);
@@ -80,8 +104,6 @@ function build(ctx: FieldCtx): Float32Array {
   F = ctx.dimTexture(F, orbits, 0.2);
 
   // --- the ring, then the planet on top of it ---
-  const planetMask = ctx.mask((d: DrawCtx) => circle(d, planetX, planetY, planetR, 255));
-
   const ring = ctx.mask((d: DrawCtx) => {
     ell(d, planetX, planetY, planetR * 2.15, planetR * 0.52, 255);
     ell(d, planetX, planetY, planetR * 1.72, planetR * 0.4, 0);
@@ -91,7 +113,12 @@ function build(ctx: FieldCtx): Float32Array {
   // the front half of the ring stays; the planet body will cover the rest
   F = ctx.moat(F, ring, 1.8, 0.85);
 
-  // planet: solid disc with dark banding, plus a crescent terminator
+  // planet: solid disc with dark banding (gas-giant stripes read as "planet"
+  // on their own — a previous version also cut a night-side crescent here,
+  // but the cutout circle was bigger than the offset between its centre and
+  // the planet's, so it swallowed more than half the disc and left only a
+  // sliver, which is why "that planet looks weird" — it wasn't reading as a
+  // circle at all. Bands alone keep the disc's silhouette intact.)
   const planet = ctx.mask((d: DrawCtx) => {
     circle(d, planetX, planetY, planetR, 255);
     for (let k = -3; k <= 3; k++) {
@@ -99,8 +126,6 @@ function build(ctx: FieldCtx): Float32Array {
       const halfW = Math.sqrt(Math.max(0, planetR * planetR - (yy - planetY) * (yy - planetY)));
       thickline(d, [[planetX - halfW, yy], [planetX + halfW, yy]], planetR * 0.055, 0);
     }
-    // night side
-    circle(d, planetX + planetR * 0.52, planetY + planetR * 0.1, planetR * 0.92, 0);
   });
   F = ctx.moat(F, planet, 3.2, 1.0);
 
@@ -142,7 +167,7 @@ function build(ctx: FieldCtx): Float32Array {
 
 export const orrery: Preset = {
   id: 'orrery',
-  name: 'Orrery',
+  name: 'Ringed Planet',
   group: 'cosmic',
   description: 'A ringed planet with moons, orbit arcs and constellation figures on a deep star field.',
   stipple: { pitchMm: 1.3, dMin: 0.26, dMax: 0.52, jitter: 0.12, thresh: 0.05, mode: 'hybrid', knee: 0.36, gamma: 0.6 },
