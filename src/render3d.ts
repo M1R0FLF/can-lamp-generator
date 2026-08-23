@@ -26,6 +26,11 @@ export const CAN_STYLES: CanStyle[] = [
 
 const STRIPS = 64;
 const TILT_DEG = -10;
+// How far the LED cable droops below dead-level once it clears the can
+// surface (see the wire.style.transform comment in update()). Sign verified
+// empirically against a screenshot, not derived — CSS rotateX's direction
+// convention is easy to get backwards from memory.
+const WIRE_DROOP_DEG = 25;
 // In lit mode the can is a lamp glowing in an otherwise dark room: opaque
 // paint doesn't emit light, so it should read as NEAR black regardless of
 // its actual color, with only a faint hint of hue so the color choice still
@@ -59,6 +64,8 @@ export interface Can3D {
     maxHeightPx?: number;
     /** match the flat preview's own rendered width instead of guessing */
     widthPx?: number;
+    /** draws the LED wire hole's cable exiting the can at this angle; null/undefined hides it */
+    ledNotch?: { x: number; r: number } | null;
   }): void;
 }
 
@@ -85,6 +92,33 @@ export function createCan3D(mount: HTMLElement): Can3D {
   botCap.className = 'can3d-cap can3d-cap-bot';
   cylinder.appendChild(topCap);
   cylinder.appendChild(botCap);
+
+  // The LED wire hole's cable. Two nested elements rather than one, to avoid
+  // hand-deriving a custom transform-origin: `wireAnchor` is a zero-width,
+  // full-can-HEIGHT line positioned with the EXACT same
+  // translate(-50%,-50%) rotateY(angle) translateZ(radius) formula every
+  // strip already uses (proven correct — it's what makes the strips form a
+  // cylinder at all), so its bottom end sits precisely on the can's rim at
+  // the given angle. `wire`, a plain child of that anchor pinned at
+  // top:100%, pivots around that same point (transform-origin: 50% 0%) —
+  // at rotateX(0) it would hang straight down, but update() instead swings
+  // it to point OUT along the anchor's local Z axis. That axis already
+  // carries the anchor's own rotateY(angle), so "swing the child 90° around
+  // its local X" always means "point outward at whatever angle the notch is
+  // at," for every notch position, with no per-angle-branch needed — the
+  // same reason the strips' identical-looking formula tiles into a full
+  // cylinder regardless of which strip index it is. Both children of
+  // `cylinder` (not `stage`), so they spin with the can via its group
+  // transform, and both participate in the same preserve-3d hierarchy the
+  // strips do, so the browser's native depth-sorting occludes the wire
+  // behind the can's body when it's on the far side — same as strips do.
+  const wireAnchor = document.createElement('div');
+  wireAnchor.className = 'can3d-wire-anchor';
+  wireAnchor.style.display = 'none';
+  const wire = document.createElement('div');
+  wire.className = 'can3d-wire';
+  wireAnchor.appendChild(wire);
+  cylinder.appendChild(wireAnchor);
 
   const shade = document.createElement('div');
   shade.className = 'can3d-shade';
@@ -132,6 +166,7 @@ export function createCan3D(mount: HTMLElement): Can3D {
     /** cap the stage so the can fits the space actually on screen */
     maxHeightPx?: number;
     widthPx?: number;
+    ledNotch?: { x: number; r: number } | null;
   }) {
     const { texture, lit, style, diameterMm, heightMm } = opts;
     // mount.clientWidth is a trap here: mount has no width of its own in
@@ -195,6 +230,33 @@ export function createCan3D(mount: HTMLElement): Can3D {
     }
     topCap.style.transform = `translate(-50%, -50%) rotateX(90deg) translateZ(${heightPx / 2}px)`;
     botCap.style.transform = `translate(-50%, -50%) rotateX(90deg) translateZ(${-heightPx / 2}px)`;
+
+    if (opts.ledNotch) {
+      // Same angle convention as strip i's rotateY(i * 360/STRIPS): a linear
+      // map from x-position (mm, 0..W) to degrees (0..360) around the can.
+      const W = Math.PI * diameterMm;
+      const angleDeg = (opts.ledNotch.x / W) * 360;
+      wireAnchor.style.display = 'block';
+      wireAnchor.style.width = '0px';
+      wireAnchor.style.height = `${heightPx}px`;
+      // Identical formula to every strip above — that's what puts this
+      // anchor's bottom edge exactly on the can's rim at the right angle;
+      // see the constructor comment for why a second nested element (rather
+      // than a custom transform-origin) is what points the visible wire out
+      // from there.
+      wireAnchor.style.transform = `translate(-50%, -50%) rotateY(${angleDeg}deg) translateZ(${radiusPx}px)`;
+      // A short stub, not a long hang: scaled off the can's own radius so it
+      // reads as a cord clearing the body, never a wire-length antenna.
+      const wireLen = Math.max(16, Math.min(38, radiusPx * 0.7));
+      wire.style.height = `${wireLen}px`;
+      // 90deg alone would point it dead level, straight out; subtracting
+      // WIRE_DROOP_DEG tips the free end down, like a real cord sagging
+      // under its own weight once clear of the can (verified against the
+      // computed matrix3d, not derived — see the constant's comment).
+      wire.style.transform = `translateX(-50%) rotateX(${90 - WIRE_DROOP_DEG}deg)`;
+    } else {
+      wireAnchor.style.display = 'none';
+    }
   }
 
   return {
