@@ -167,6 +167,27 @@ export function motifCount(W: number, footprintMm: number, min = 1): number {
   return Math.max(min, Math.round(W / Math.max(footprintMm, 1e-6)));
 }
 
+/**
+ * Seam-safe per-motif variation, in -1..1.
+ *
+ * Use this instead of `k % n` for ANY property that varies from motif to
+ * motif — height, size, facing, tilt.
+ *
+ * The trap: on a wrapped canvas the last motif and the first are NEIGHBOURS.
+ * `k % 3` over 4 motifs gives 0,1,2,0 — so motif 3 and motif 0 get identical
+ * treatment and sit right next to each other across the seam, which reads as
+ * an obvious duplicated pair. (Found exactly this way: two balloons at the
+ * same height ended up adjacent over the seam.) It only looks correct when
+ * `count` happens to be a multiple of `n`, and count changes with diameter,
+ * so it will eventually break at some can size.
+ *
+ * Driving the variation with an integer harmonic of the angle around the can
+ * is continuous across the seam by construction, at every diameter.
+ */
+export function wrapVary(k: number, count: number, harmonics = 1, phase = 0): number {
+  return Math.sin(2 * Math.PI * Math.max(1, Math.round(harmonics)) * (k / Math.max(count, 1)) + phase);
+}
+
 // ---------- elementwise ops ----------
 
 export function maxInto(a: Float32Array, b: Float32Array): Float32Array {

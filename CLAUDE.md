@@ -31,6 +31,27 @@ layout broke. Same again on the height change.
 Store `x` as a fraction of `W`. Store `y` as `{anchor: 'top'|'bottom'|'center', offset}`.
 Since users can type any diameter, this is not optional.
 
+### 1b. The last motif is the first motif's NEIGHBOUR — never vary by `k % n`
+
+A corollary of rule 1 that is easy to miss because the flat preview hides it. On a wrapped
+canvas motif `count-1` sits directly beside motif `0`. So any per-motif variation written
+as `k % n` — height, size, facing, tilt — silently produces two identical neighbours
+whenever `count` is not a multiple of `n`:
+
+```
+count = 4, variation = k % 3   ->   0, 1, 2, 0
+                                    ^           ^  adjacent across the seam
+```
+
+Caught in the wild: Balloons placed 4 balloons with `k % 3` heights, so two ended up at
+the same altitude right next to each other over the seam. Strict alternation (`k % 2`) is
+worse still — it is topologically *impossible* to close on a wrap with an odd count, and
+`motifCount()` returns odd counts at plenty of diameters.
+
+Use **`wrapVary(k, count, harmonics, phase)`** from `fieldkit.ts` instead. It drives the
+variation from an integer harmonic of the angle around the can, so it is continuous across
+the seam at every diameter. Verify with the preview's "Tile 2× to verify the seam" toggle.
+
 ### 2. `pitch ≥ d_max + min_web`
 
 On a hex grid with **zero jitter**, all six neighbours sit at exactly `pitch`, so this is
@@ -46,6 +67,41 @@ At ~1.2 mm pitch a thin branching structure dissolves into noise. A solid form w
 cuts inside it reads from across the room. The first Escarcha hero was a botanically
 correct dendrite and it was invisible; replacing it with a chunky solid six-point star
 fixed it. **Minimum legible feature ≈ 16 mm and closed.**
+
+### 3b. The subject must DOMINATE, not merely clear the minimum
+
+16 mm is a floor, not a target, and clearing it is not the same as designing well. The
+real viewing condition is **a can standing upright, seen from across a room** — so the
+hero has to own the canvas, and every decorative layer has to stay clearly subordinate
+to it.
+
+The failure this rule exists to prevent, in the user's words: *"good idea but too little
+owl (main detail), too much decoration/fill."* The Owls preset had 27 mm owls — well over
+the rule-3 floor — and still failed, because they were small relative to the moon and
+buried in a full-canvas foliage texture, so the eye read "busy dark rectangle" instead of
+"owls". Honeycomb failed the same way: the bees were technically big enough but were
+outcompeted by a bright comb covering the entire wall.
+
+Practical guidance — note the target depends on how many subjects there are:
+
+- **Single-hero designs** (Eclipse's disc, one big moon): the hero should own roughly
+  **a third to a half of the wall height** — on a 142 mm can, 45-70 mm.
+- **Repeated-subject scenes** (balloons, owls, cars): each subject wants to be about
+  **a quarter of the wall height**, ~30-40 mm on a 142 mm can. Do NOT push these to
+  half the wall — asked whether the balloons should be bigger, the user's correction was
+  *"not much bigger, just a tad"*. Overshooting here is its own failure mode.
+- Prefer **two or three subjects over five or six.** `motifCount()` exists to add copies
+  on a wider can, but a footprint yielding 5+ heroes on a standard can usually means
+  each one is too small.
+- **Fill is a supporting player, and this matters more than absolute size.** Owls failed
+  at 27 mm mostly because a full-canvas foliage texture competed with it. If a background
+  texture covers the whole wall at comparable brightness, it is fighting the subject.
+  Give the hero genuinely dark breathing room next to it, not just a moat.
+- A second bright element (a moon, a sun) must not sit **behind or touching** the hero;
+  they merge and both become unreadable. Separate them, or make one clearly subordinate.
+- **Accessory shapes can swamp the subject too.** Lighthouse failed because a rock and a
+  keeper's house merged into a black mass larger than the tower itself. Every secondary
+  form has to stay visibly smaller and dimmer than the thing it is supporting.
 
 ### 4. Bright shapes need a dark moat
 
