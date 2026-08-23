@@ -26,6 +26,24 @@ export const CAN_STYLES: CanStyle[] = [
 
 const STRIPS = 64;
 const TILT_DEG = -10;
+// In lit mode the can is a lamp glowing in an otherwise dark room: opaque
+// paint doesn't emit light, so it should read as NEAR black regardless of
+// its actual color, with only a faint hint of hue so the color choice still
+// shows. This is why 'lighten' compositing (max of source and destination)
+// only ever looked right for the Blackout style before this constant existed
+// — lighten is a no-op against black, but against a body color anywhere
+// near white it makes EVERYTHING max out toward white, wiping the pattern.
+const LIT_AMBIENT = 0.16;
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function scaleColor(hex: string, factor: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgb(${Math.round(r * factor)}, ${Math.round(g * factor)}, ${Math.round(b * factor)})`;
+}
 
 export interface Can3D {
   stage: HTMLDivElement;
@@ -138,7 +156,7 @@ export function createCan3D(mount: HTMLElement): Can3D {
       canvas.width = stripWpx;
       canvas.height = Math.round(heightPx);
       const ctx = canvas.getContext('2d')!;
-      ctx.fillStyle = style.body;
+      ctx.fillStyle = lit ? scaleColor(style.body, LIT_AMBIENT) : style.body;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.globalCompositeOperation = lit ? 'lighten' : 'source-over';
       ctx.drawImage(texture, i * sliceW, 0, sliceW, texH, 0, 0, canvas.width, canvas.height);
@@ -157,10 +175,12 @@ export function createCan3D(mount: HTMLElement): Can3D {
       canvas.style.transform = `translate(-50%, -50%) rotateY(${angle}deg) translateZ(${radiusPx}px)`;
     });
 
+    const capHi = lit ? scaleColor(style.cap, LIT_AMBIENT) : style.cap;
+    const capLo = lit ? scaleColor(style.bodyShade, LIT_AMBIENT) : style.bodyShade;
     for (const cap of [topCap, botCap]) {
       cap.style.width = `${radiusPx * 2}px`;
       cap.style.height = `${radiusPx * 2}px`;
-      cap.style.background = `radial-gradient(circle at 38% 38%, ${style.cap}, ${style.bodyShade})`;
+      cap.style.background = `radial-gradient(circle at 38% 38%, ${capHi}, ${capLo})`;
     }
     topCap.style.transform = `translate(-50%, -50%) rotateX(90deg) translateZ(${heightPx / 2}px)`;
     botCap.style.transform = `translate(-50%, -50%) rotateX(90deg) translateZ(${-heightPx / 2}px)`;
