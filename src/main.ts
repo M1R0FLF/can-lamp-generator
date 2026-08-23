@@ -33,6 +33,8 @@ import {
   DEFAULT_MIN_WEB_TARGET,
   DEFAULT_LASER_SPEED,
   DEFAULT_LASER_PASSES,
+  DEFAULT_OPEN_AREA_MIN_PCT,
+  DEFAULT_OPEN_AREA_MAX_PCT,
   estimateCutSeconds,
 } from './engine/qualityPresets';
 import { CAN_SIZES, DEFAULT_CAN, clampCan, aspectWarning, matchCanSize } from './engine/canSizes';
@@ -211,7 +213,16 @@ function renderReadout() {
 
   let area = 0;
   for (const h of r.holes) area += Math.PI * h.r * h.r;
-  setText('roOpenArea', `${((100 * area) / (r.W * r.H)).toFixed(1)} %`);
+  const openAreaPct = (100 * area) / (r.W * r.H);
+  const openAreaEl = el('roOpenArea');
+  openAreaEl.textContent = `${openAreaPct.toFixed(1)} %`;
+  const openAreaOk = openAreaPct >= DEFAULT_OPEN_AREA_MIN_PCT && openAreaPct <= DEFAULT_OPEN_AREA_MAX_PCT;
+  openAreaEl.className = 'value ' + (openAreaOk ? 'ok' : 'danger');
+  openAreaEl.title = openAreaOk
+    ? ''
+    : openAreaPct < DEFAULT_OPEN_AREA_MIN_PCT
+      ? `Under ${DEFAULT_OPEN_AREA_MIN_PCT}% — reads as mostly black/empty (CLAUDE.md rule 8)`
+      : `Over ${DEFAULT_OPEN_AREA_MAX_PCT}% — leaves no dark ground for contrast (CLAUDE.md rule 8)`;
   setText('roCutTime', formatDuration(estimateCutSeconds(r.holes.length, state.laserSpeed, state.laserPasses)));
   setText('roGenTime', `${(r.buildMs + r.sampleMs).toFixed(0)} ms`);
 }

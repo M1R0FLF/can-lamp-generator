@@ -72,6 +72,35 @@ than the grid becomes aliasing, not detail. Sharpening filters actively hurt her
 Fill quiet areas with a *dim* texture layer (crack network, guilloché) at roughly 1/7 the
 per-area brightness of the hero shapes. Uniform mid-tone everywhere destroys contrast.
 
+### 8. Boring is fine. Empty and overstuffed are not.
+
+Learned from rating all 13 presets against the user's taste (2026-08-23): a plain,
+repeating, "boring" pattern (a tiled star, a wave grid) is a perfectly good preset. It does
+not need to be conceptually ambitious to be good. What actually fails a preset is either
+extreme:
+
+- **Too little visual material.** Mostly black/empty canvas with a thin scattering of
+  content — reads as broken, not minimalist. Killed the "Current" preset (two thin wavy
+  bands, 1.3% open area).
+- **Too much fussy detail.** Fine intricate structure — thin branching lines, tiny
+  scattered sub-elements — that fights legibility at this pitch (this is rule 3 again,
+  restated as a design taste rather than a technical constraint). The "Orrery" constellation
+  lines and "Circuit" preset's PCB traces both got called out for this: decent concepts,
+  but the execution didn't hold together as a shape you can actually read.
+
+Concept quality and execution quality are separate axes — score them separately. "Circuit"
+had a good concept (PCB motif) but bad execution (didn't actually read as circuitry); that's
+a redesign candidate, not a delete.
+
+**Automated guardrail**: [`qualityPresets.ts`](src/engine/qualityPresets.ts)'s
+`DEFAULT_OPEN_AREA_MIN_PCT` / `DEFAULT_OPEN_AREA_MAX_PCT` catch the "too little visual
+material" failure numerically — the live readout's Open Area goes red outside 1.8-8%,
+calibrated against the rated pass (sparse/bad presets sat at 1.3-1.7%, every good preset
+was ≥2.0%). There is no reliable numeric check for "too much fussy detail" — that's a
+composition judgment, not a density one. Catch it the way it was caught here: generate the
+preset, look at the flat unlit/lit render, and ask whether it reads as one or two big
+shapes from across the room (rule 3) or dissolves into noise.
+
 ---
 
 ## Port plan

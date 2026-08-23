@@ -21,6 +21,26 @@ export const DEFAULT_QUALITY_INDEX = 1; // Standard
 export const DEFAULT_MIN_WEB_TARGET = 0.3; // mm, per CLAUDE.md rule 2
 
 /**
+ * Open-area guardrail, per CLAUDE.md rule 8 ("boring is fine, empty and
+ * overstuffed are not"). Calibrated against a rated pass over all 13
+ * presets at Standard quality on a Ø65x142mm can:
+ *
+ *   Flagged as too sparse (bad/average, "mostly black"):
+ *     Current 1.3% (deleted), Abyss 1.3%, Seigaiha 1.7%, Orrery 1.5%
+ *   Passed (good):
+ *     Roadster 2.0%, Circuit 2.3%, Deco/Metropolis 2.7%, Mango Salvaje 3.0%,
+ *     Horizon 3.5%, Alpenglow/Girih 4.3%, Escarcha 4.5%
+ *
+ * The floor sits right in the 1.7-2.0% gap that split those two groups
+ * cleanly. The ceiling has no real bad example yet (nothing rated has come
+ * close) — it's a precautionary guard against a preset leaving no dark
+ * ground at all, not a calibrated line. Revisit both if a new preset
+ * disagrees.
+ */
+export const DEFAULT_OPEN_AREA_MIN_PCT = 1.8;
+export const DEFAULT_OPEN_AREA_MAX_PCT = 8;
+
+/**
  * Cut-time model, calibrated against two real jobs on an xTool fiber 20W
  * with rotary attachment (speed 10 mm/s, 5 passes):
  *
