@@ -8,6 +8,7 @@ import {
   PhotoSource,
   PhotoParams,
   buildPhotoField,
+  PHOTO_STIPPLE,
 } from './photo';
 import { CustomShape, buildCustomField, CUSTOM_STIPPLE } from './customShapes';
 
@@ -183,9 +184,22 @@ export function generate(
   const H = can.heightMm;
   const panY = Math.min(1, Math.max(0, can.panY ?? 0));
 
+  // A photo's stipple defaults are NOT the presets' — see PHOTO_STIPPLE's own
+  // comment. The short version: a preset authors its own tone structure and
+  // can afford DEFAULT_STIPPLE's low knee (0.42), because its bright forms are
+  // *meant* to come out solid. A photograph cannot — above the knee every
+  // grid point gets a hole and the only thing still varying is diameter, which
+  // spans ~4x in area, nowhere near enough to carry continuous tone (rule 5),
+  // so a face lands as one flat blob. PHOTO_STIPPLE's knee of 0.95 keeps
+  // density tracking tone across almost the whole range instead.
+  //
+  // This tuning existed but was unreachable: photos fell through to `{}` here,
+  // silently taking the preset-shaped defaults and hitting exactly the flat-
+  // blob failure the constant was written to avoid.
   const designStipple =
     source.kind === 'preset' ? getPreset(source.presetId).stipple :
-    source.kind === 'custom' ? CUSTOM_STIPPLE : {};
+    source.kind === 'custom' ? CUSTOM_STIPPLE :
+    PHOTO_STIPPLE;
   const params: StippleParams = { ...DEFAULT_STIPPLE, ...designStipple, ...stippleOverrides };
 
   // Presets are authored against DESIGN_HEIGHT_MM, at NATURAL PROPORTIONS.
@@ -296,6 +310,24 @@ export function generate(
     cropWindow,
     ledNotch,
   };
+}
+
+/**
+ * The exact pixel grid a photo source will be built against.
+ *
+ * Photos are the one source kind whose field input has to be prepared by the
+ * CALLER: `photo.ts` deliberately splits the expensive resample
+ * (`sampleImage`) from the cheap tone pipeline (`buildPhotoField`) so dragging
+ * a tone slider doesn't redo the resample, which means the caller holds the
+ * `PhotoSource`. That resample must land on precisely the grid `generate()`
+ * will later hand to `buildPhotoField()`, so the derivation lives here rather
+ * than being re-guessed at the call site: photos build at the can's REAL
+ * height — no DESIGN_HEIGHT_MM reference frame and no crop window, unlike
+ * presets (see the `designH` branch above). A caller deriving that
+ * independently would produce a silently mismatched grid the day it changes.
+ */
+export function photoFieldCtx(can: CanSpec): FieldCtx {
+  return new FieldCtx(Math.PI * can.diameterMm, can.heightMm, can.ppm);
 }
 
 export function resultToSvg(r: GenerateResult, title: string): string {

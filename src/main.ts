@@ -4,10 +4,24 @@ import {
   generate,
   GenerateResult,
   SourceSpec,
+  CanSpec,
   resultToSvg,
+  photoFieldCtx,
   DESIGN_HEIGHT_MM,
   AnnotationSpec,
 } from './engine/generate';
+import {
+  PhotoParams,
+  PhotoPlacement,
+  PhotoSource,
+  PhotoFit,
+  SeamMode,
+  DEFAULT_PHOTO_PARAMS,
+  DEFAULT_PLACEMENT,
+  PHOTO_STIPPLE,
+  sampleImage,
+  placementFor,
+} from './engine/photo';
 import { PRESETS, getPreset } from './engine/presets';
 import { Hole, StippleMode, StippleParams, DEFAULT_STIPPLE } from './engine/stipple';
 import { renderGlow } from './engine/glow';
@@ -53,7 +67,7 @@ const PPM_FULL = 7;
 // (CLAUDE.md-adjacent lesson: shrinking-to-fit made large cans unreadable).
 const FLAT_SP = 4.6;
 
-type SourceKind = 'preset' | 'custom';
+type SourceKind = 'preset' | 'custom' | 'photo';
 type HoleMode = 'varying' | 'fixed';
 type PreviewMode = 'lit' | 'unlit' | 'field';
 type ViewMode = 'both' | 'flat' | 'can';
@@ -90,6 +104,11 @@ interface State {
   annotationSizeMm: number;
   ledHoleEnabled: boolean;
   ledHoleDiameterMm: number;
+  /** decoded upload; null until the user actually picks a file */
+  photoImage: ImageBitmap | null;
+  photoName: string;
+  photoPlacement: PhotoPlacement;
+  photoParams: PhotoParams;
 }
 
 const state: State = {
@@ -123,9 +142,44 @@ const state: State = {
   // 0.1mm aluminium plus any grommet — tune in Advanced if that's too tight
   // or too loose once you've test-cut one.
   ledHoleDiameterMm: 3.4,
+  photoImage: null,
+  photoName: '',
+  photoPlacement: { ...DEFAULT_PLACEMENT },
+  photoParams: { ...DEFAULT_PHOTO_PARAMS },
 };
 
 let result: GenerateResult | null = null;
+
+/**
+ * Memoized resample of the uploaded photo.
+ *
+ * `sampleImage()` is the expensive half of the photo pipeline (a full-canvas
+ * drawImage plus a getImageData over every field pixel), and photo.ts splits
+ * it out from `buildPhotoField()` precisely so that dragging a *tone* slider
+ * doesn't redo it. That split only pays off if the result is actually reused,
+ * and the natural call pattern here would defeat it twice over: every
+ * `draftThenFull()` generates at PPM_DRAFT and then again at PPM_FULL, and
+ * every tone slider fires a fresh `regenerate()`.
+ *
+ * So the key covers exactly what the resample depends on — the image itself,
+ * the pixel grid it lands on, and the placement — and nothing that only
+ * affects tone. `photoSeq` stands in for image identity: a fresh upload of a
+ * different file at the same size and placement would otherwise produce an
+ * identical key and hand back the previous picture's pixels.
+ */
+let photoCache: { key: string; src: PhotoSource } | null = null;
+let photoSeq = 0;
+
+function photoSourceFor(can: CanSpec): PhotoSource | null {
+  if (!state.photoImage) return null;
+  const ctx = photoFieldCtx(can);
+  const p = state.photoPlacement;
+  const key = [photoSeq, ctx.Wp, ctx.Hp, p.fit, p.seam, p.zoom, p.offsetX, p.offsetY, p.coverage].join('|');
+  if (photoCache && photoCache.key === key) return photoCache.src;
+  const src = sampleImage(state.photoImage, ctx, p);
+  photoCache = { key, src };
+  return src;
+}
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const setText = (id: string, v: string) => {
@@ -157,8 +211,14 @@ const presetSelect = el<HTMLSelectElement>('preset');
 
 // ---------- resolve the stipple params in play ----------
 function effectiveStipple(): StippleParams {
+  // Gated on an image actually being loaded, not just on the tab being open:
+  // with no image `regenerate()` falls back to rendering the preset, so the
+  // stipple params have to fall back in step or the preview would be sampled
+  // with photo tuning (knee 0.95) while showing preset artwork.
   const designPart =
-    state.sourceKind === 'preset' ? getPreset(state.presetId).stipple : CUSTOM_STIPPLE;
+    state.sourceKind === 'photo' && state.photoImage ? PHOTO_STIPPLE :
+    state.sourceKind === 'custom' ? CUSTOM_STIPPLE :
+    getPreset(state.presetId).stipple;
   const q = QUALITY_PRESETS[state.qualityIndex];
   const qualityPart = q
     ? { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter }
@@ -180,10 +240,25 @@ function effectiveStipple(): StippleParams {
 
 // ---------- generation ----------
 function regenerate(ppm: number) {
+  const can: CanSpec = {
+    diameterMm: state.diameterMm,
+    heightMm: state.heightMm,
+    ppm,
+    panY: state.panY,
+    ledHole: {
+      enabled: state.ledHoleEnabled,
+      diameterMm: state.ledHoleDiameterMm,
+    },
+  };
+  // With the photo tab open but no file chosen yet, fall through to the preset
+  // rather than rendering an empty can — the pane's own empty state is what
+  // explains the situation, and a blank preview looks like a broken app.
+  // effectiveStipple() gates on the same condition so the two stay consistent.
+  const photoSrc = state.sourceKind === 'photo' ? photoSourceFor(can) : null;
   const source: SourceSpec =
-    state.sourceKind === 'custom'
-      ? { kind: 'custom', shapes: state.shapes }
-      : { kind: 'preset', presetId: state.presetId };
+    state.sourceKind === 'custom' ? { kind: 'custom', shapes: state.shapes }
+    : photoSrc ? { kind: 'photo', source: photoSrc, params: state.photoParams }
+    : { kind: 'preset', presetId: state.presetId };
   const annotation: AnnotationSpec | undefined = state.annotationText.trim()
     ? {
         text: state.annotationText.trim(),
@@ -193,21 +268,7 @@ function regenerate(ppm: number) {
         sizeMm: state.annotationSizeMm,
       }
     : undefined;
-  result = generate(
-    {
-      diameterMm: state.diameterMm,
-      heightMm: state.heightMm,
-      ppm,
-      panY: state.panY,
-      ledHole: {
-        enabled: state.ledHoleEnabled,
-        diameterMm: state.ledHoleDiameterMm,
-      },
-    },
-    source,
-    effectiveStipple(),
-    annotation
-  );
+  result = generate(can, source, effectiveStipple(), annotation);
   renderCropRail();
   renderReadout();
   renderPreviews();
@@ -681,6 +742,61 @@ function syncInputs() {
   setText('annotationSizeVal', `${state.annotationSizeMm.toFixed(0)} mm`);
   setText('annotationOffsetVal', `${state.annotationYOffsetMm >= 0 ? '+' : ''}${state.annotationYOffsetMm.toFixed(0)} mm`);
   setText('ledHoleDiameterVal', `${state.ledHoleDiameterMm.toFixed(1)} mm`);
+
+  // ---- photo source ----
+  const pl = state.photoPlacement;
+  const pp = state.photoParams;
+  set('photoZoom', String(pl.zoom));
+  set('photoCoverage', String(pl.coverage));
+  set('photoOffsetX', String(pl.offsetX));
+  set('photoOffsetY', String(pl.offsetY));
+  set('photoPosterize', String(pp.posterize));
+  set('photoGamma', String(pp.gamma));
+  set('photoLocalContrast', String(pp.localContrast));
+  set('photoLocalContrastRadius', String(pp.localContrastRadiusMm));
+  set('photoVignette', String(pp.vignette));
+  set('photoEdgeBoost', String(pp.edgeBoost));
+  set('photoAmbient', String(pp.ambient));
+  set('photoBlackPoint', String(pp.blackPoint));
+  set('photoWhitePoint', String(pp.whitePoint));
+  setText('photoZoomVal', `${pl.zoom.toFixed(2)}×`);
+  setText('photoCoverageVal', `${Math.round(pl.coverage * 100)}%`);
+  setText('photoOffsetXVal', `${pl.offsetX >= 0 ? '+' : ''}${Math.round(pl.offsetX * 100)}%`);
+  setText('photoOffsetYVal', `${pl.offsetY >= 0 ? '+' : ''}${Math.round(pl.offsetY * 100)}%`);
+  setText('photoPosterizeVal', pp.posterize >= 2 ? `${Math.round(pp.posterize)} steps` : 'off');
+  setText('photoGammaVal', pp.gamma.toFixed(2));
+  setText('photoLocalContrastVal', pp.localContrast.toFixed(2));
+  setText('photoLocalContrastRadiusVal', `${pp.localContrastRadiusMm.toFixed(0)} mm`);
+  setText('photoVignetteVal', pp.vignette.toFixed(2));
+  setText('photoEdgeBoostVal', pp.edgeBoost.toFixed(2));
+  setText('photoAmbientVal', pp.ambient.toFixed(2));
+  setText('photoBlackPointVal', pp.blackPoint.toFixed(2));
+  setText('photoWhitePointVal', pp.whitePoint.toFixed(2));
+  for (const b of document.querySelectorAll<HTMLElement>('#photoFitSeg button')) {
+    b.classList.toggle('active', b.dataset.fit === pl.fit);
+  }
+  for (const b of document.querySelectorAll<HTMLElement>('#photoSeamSeg button')) {
+    b.classList.toggle('active', b.dataset.seam === pl.seam);
+  }
+  for (const b of document.querySelectorAll<HTMLElement>('#photoAutoLevelsSeg button')) {
+    b.classList.toggle('active', (b.dataset.auto === '1') === pp.autoLevels);
+  }
+  const invertBtn = document.getElementById('photoInvert');
+  if (invertBtn) invertBtn.classList.toggle('active', pp.invert);
+  const levelsFields = document.getElementById('photoLevelsFields');
+  if (levelsFields) levelsFields.style.display = pp.autoLevels ? 'none' : 'flex';
+  // 'coverage' only means anything in fade mode — the other two seam modes
+  // span the full circumference by construction.
+  const covField = document.getElementById('photoCoverage')?.closest('.field') as HTMLElement | null;
+  if (covField) covField.style.opacity = pl.seam === 'fade' ? '1' : '0.4';
+  setText(
+    'photoSeamHint',
+    pl.seam === 'fade'
+      ? 'Tone fades to black before the seam, so nothing has to line up on the back.'
+      : pl.seam === 'mirror'
+      ? 'Mirrors one half into the other — the wrap matches exactly, at any diameter.'
+      : 'Spans the whole circumference. The left and right edges meet at the back, so pick a photo whose sides are similar.'
+  );
 }
 
 function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T {
@@ -851,17 +967,182 @@ el('ledHoleSeg').addEventListener('click', (e) => {
 numInput('ledHoleDiameter', (v) => (state.ledHoleDiameterMm = v), true);
 
 // source toggle
-el('sourceSeg').addEventListener('click', (e) => {
-  const btn = (e.target as HTMLElement).closest('button');
-  if (!btn) return;
-  state.sourceKind = btn.dataset.source as SourceKind;
-  for (const b of el('sourceSeg').querySelectorAll('button')) b.classList.toggle('active', b === btn);
-  el('presetPane').style.display = state.sourceKind === 'preset' ? 'block' : 'none';
-  el('customPane').style.display = state.sourceKind === 'custom' ? 'block' : 'none';
+//
+// Extracted rather than left inline in the click handler because choosing a
+// source isn't only something the segmented control does: loading an image
+// has to switch to it too, or you drop a file and nothing visible happens
+// because the preview is still rendering whichever source was already active.
+function setSourceKind(kind: SourceKind) {
+  state.sourceKind = kind;
+  for (const b of el('sourceSeg').querySelectorAll<HTMLElement>('button')) {
+    b.classList.toggle('active', b.dataset.source === kind);
+  }
+  el('presetPane').style.display = kind === 'preset' ? 'block' : 'none';
+  el('customPane').style.display = kind === 'custom' ? 'block' : 'none';
+  el('photoPane').style.display = kind === 'photo' ? 'block' : 'none';
   state.overrides = {};
   syncInputs();
   draftThenFull();
-  if (state.sourceKind === 'custom') renderEditor();
+  if (kind === 'custom') renderEditor();
+}
+
+el('sourceSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  setSourceKind(btn.dataset.source as SourceKind);
+});
+
+// ---------- photo source ----------
+const photoFileInput = el<HTMLInputElement>('photoFile');
+
+async function loadPhotoFile(file: File | undefined | null) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    setText('photoStatus', `"${file.name}" isn't an image file.`);
+    return;
+  }
+  setText('photoStatus', `Reading ${file.name}…`);
+  try {
+    // imageOrientation:'from-image' applies the EXIF rotation tag. Phone
+    // photos are very often stored landscape with a "rotate 90" tag, and
+    // without this they'd come through the resample sideways. The fallback
+    // covers browsers that reject the option rather than ignoring it.
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() =>
+      createImageBitmap(file)
+    );
+    state.photoImage?.close?.();
+    state.photoImage = bmp;
+    state.photoName = file.name;
+    photoSeq++;
+    photoCache = null;
+    // Pick the wrap strategy from the image's own shape rather than making the
+    // user discover it. Landscape wraps the whole can; a portrait becomes a
+    // front medallion. Re-derived on every upload, since a new picture is a
+    // new composition — and announced in the status line so the change to the
+    // Fill/seam buttons doesn't look like it happened by itself.
+    state.photoPlacement = placementFor(
+      bmp.width,
+      bmp.height,
+      Math.PI * state.diameterMm,
+      state.heightMm
+    );
+    const wrapped = state.photoPlacement.seam === 'stretch';
+    setText(
+      'photoStatus',
+      `${file.name} — ${bmp.width}×${bmp.height}. ` +
+        (wrapped
+          ? 'Landscape, so it wraps the whole can.'
+          : 'Upright, so it sits on the front with the back left dark.')
+    );
+    el('photoProps').style.display = 'block';
+    // Loading an image IS choosing the photo source. Without this, dropping a
+    // file while the Preset tab is active leaves the preview showing the
+    // preset — the upload appears to have silently done nothing.
+    // setSourceKind() re-syncs and regenerates, so no separate call here.
+    setSourceKind('photo');
+  } catch {
+    setText('photoStatus', `Couldn't read "${file.name}" — try a JPG or PNG.`);
+  }
+}
+
+photoFileInput.addEventListener('change', () => {
+  void loadPhotoFile(photoFileInput.files?.[0]);
+  // Clear the input's value so re-picking the SAME file fires 'change' again;
+  // otherwise the second pick is a no-op and the app looks frozen.
+  photoFileInput.value = '';
+});
+
+{
+  const drop = el('photoDrop');
+  const openPicker = () => photoFileInput.click();
+  drop.addEventListener('click', openPicker);
+  drop.addEventListener('keydown', (e) => {
+    const k = (e as KeyboardEvent).key;
+    if (k === 'Enter' || k === ' ') {
+      e.preventDefault();
+      openPicker();
+    }
+  });
+  // dragover must be prevented too, or the browser navigates to the dropped file
+  for (const type of ['dragenter', 'dragover'] as const) {
+    drop.addEventListener(type, (e) => {
+      e.preventDefault();
+      drop.classList.add('over');
+    });
+  }
+  for (const type of ['dragleave', 'dragend'] as const) {
+    drop.addEventListener(type, () => drop.classList.remove('over'));
+  }
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    void loadPhotoFile((e as DragEvent).dataTransfer?.files?.[0]);
+  });
+}
+
+/** Placement changes invalidate the resample; tone changes don't. */
+function photoPlace<K extends keyof PhotoPlacement>(id: string, key: K) {
+  numInput(id, (v) => {
+    state.photoPlacement[key] = v as PhotoPlacement[K];
+  });
+}
+function photoTone<K extends keyof PhotoParams>(id: string, key: K) {
+  numInput(id, (v) => {
+    state.photoParams[key] = v as PhotoParams[K];
+  });
+}
+
+photoPlace('photoZoom', 'zoom');
+photoPlace('photoCoverage', 'coverage');
+photoPlace('photoOffsetX', 'offsetX');
+photoPlace('photoOffsetY', 'offsetY');
+
+photoTone('photoPosterize', 'posterize');
+photoTone('photoGamma', 'gamma');
+photoTone('photoLocalContrast', 'localContrast');
+photoTone('photoLocalContrastRadius', 'localContrastRadiusMm');
+photoTone('photoVignette', 'vignette');
+photoTone('photoEdgeBoost', 'edgeBoost');
+photoTone('photoAmbient', 'ambient');
+photoTone('photoBlackPoint', 'blackPoint');
+photoTone('photoWhitePoint', 'whitePoint');
+
+el('photoFitSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.photoPlacement.fit = btn.dataset.fit as PhotoFit;
+  syncInputs();
+  draftThenFull();
+});
+
+el('photoSeamSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.photoPlacement.seam = btn.dataset.seam as SeamMode;
+  syncInputs();
+  draftThenFull();
+});
+
+el('photoAutoLevelsSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.photoParams.autoLevels = btn.dataset.auto === '1';
+  syncInputs();
+  draftThenFull();
+});
+
+el('photoInvert').addEventListener('click', () => {
+  state.photoParams.invert = !state.photoParams.invert;
+  syncInputs();
+  draftThenFull();
+});
+
+el('photoReset').addEventListener('click', () => {
+  // Look only — deliberately keeps placement, so resetting the tone controls
+  // doesn't also throw away the framing the user just spent time on.
+  state.photoParams = { ...DEFAULT_PHOTO_PARAMS };
+  syncInputs();
+  draftThenFull();
 });
 
 // hole mode
@@ -1397,7 +1678,12 @@ window.addEventListener('resize', debounce(() => {
 // ---------- export ----------
 el<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
   if (!result) return;
-  const name = state.sourceKind === 'preset' ? getPreset(state.presetId).name : 'my-can';
+  const name =
+    state.sourceKind === 'photo' && state.photoName
+      ? state.photoName.replace(/\.[^.]+$/, '')
+      : state.sourceKind === 'preset'
+      ? getPreset(state.presetId).name
+      : 'my-can';
   const svg = resultToSvg(result, `${name} — ${state.diameterMm}×${state.heightMm}mm`);
   const blob = new Blob([svg], { type: 'image/svg+xml' });
   const url = URL.createObjectURL(blob);
