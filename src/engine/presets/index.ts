@@ -11,6 +11,15 @@ import { seigaiha } from './seigaiha';
 import { metropolis } from './metropolis';
 import { horizon } from './horizon';
 import { roadster } from './roadster';
+import { nordic } from './nordic';
+import { celtic } from './celtic';
+import { honeycomb } from './honeycomb';
+import { saguaro } from './saguaro';
+import { owls } from './owls';
+import { balloons } from './balloons';
+import { lighthouse } from './lighthouse';
+import { clockwork } from './clockwork';
+import { eclipse } from './eclipse';
 
 export * from './types';
 
@@ -27,6 +36,16 @@ export const PRESETS: Preset[] = [
   circuit,
   metropolis,
   roadster,
+  // --- second batch, pending review ---
+  nordic,
+  celtic,
+  honeycomb,
+  saguaro,
+  owls,
+  balloons,
+  lighthouse,
+  clockwork,
+  eclipse,
 ];
 
 export const PRESETS_BY_ID: Record<string, Preset> = Object.fromEntries(
