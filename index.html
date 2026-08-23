@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0f1114" />
   <title>Can Lamp Generator</title>
 </head>
 <body>
@@ -12,8 +14,11 @@
 
   <div class="layout">
     <aside class="controls">
-      <section class="ctrl">
-        <h2>Can</h2>
+      <!-- The control panels are <details> so they collapse on a phone. On
+           desktop main.ts forces them open and the CSS makes the heading inert,
+           so they read as the plain sections they used to be. -->
+      <details class="ctrl" open data-mobile="open">
+        <summary>Can</summary>
         <div class="field">
           <label>Can size</label>
           <select id="canSize"></select>
@@ -33,10 +38,10 @@
           Straight cylindrical section only — neck taper and base flare excluded.
           Perforating a taper puts the galvo out of focus.
         </div>
-      </section>
+      </details>
 
-      <section class="ctrl">
-        <h2>Source</h2>
+      <details class="ctrl" open data-mobile="open">
+        <summary>Source</summary>
         <div class="segmented" id="sourceSeg">
           <button data-source="preset" class="active">Preset</button>
           <button data-source="custom">Make your own</button>
@@ -46,13 +51,14 @@
           <select id="preset"></select>
           <p class="hint" id="presetDesc"></p>
         </div>
-      </section>
+      </details>
 
-      <section class="ctrl" id="customPane" style="display:none;">
-        <h2>Shapes</h2>
+      <details class="ctrl" id="customPane" open data-mobile="open" style="display:none;">
+        <summary>Shapes</summary>
         <div class="cat-tabs" id="catTabs"></div>
         <div class="palette" id="palette"></div>
-        <p class="hint">Drag a shape onto the canvas. Click to select, shift-click to add.
+        <p class="hint">Drag a shape onto the canvas — or just tap it to drop one in
+          the middle. Tap to select, shift-click to add.
           Arrow keys nudge; <b>Delete</b> removes.</p>
 
         <div class="preview-canvas-wrap" id="editorWrap">
@@ -99,16 +105,16 @@
           <button class="secondary" id="clearShapes">Clear all</button>
         </div>
         <p class="hint" id="selInfo"></p>
-      </section>
+      </details>
 
-      <section class="ctrl">
-        <h2>Quality <span class="tag" id="qualityLabel"></span></h2>
+      <details class="ctrl" open data-mobile="open">
+        <summary>Quality <span class="tag" id="qualityLabel"></span></summary>
         <input type="range" id="quality" min="0" max="3" step="1" />
         <div class="ticks"><span>Draft</span><span>Standard</span><span>Fine</span><span>Ultra</span></div>
-      </section>
+      </details>
 
-      <section class="ctrl">
-        <h2>Hole size</h2>
+      <details class="ctrl" open>
+        <summary>Hole size</summary>
         <div class="segmented" id="holeModeSeg">
           <button data-mode="varying" class="active">Varying</button>
           <button data-mode="fixed">Fixed</button>
@@ -117,7 +123,7 @@
           <label>Fixed diameter (mm) <span class="val" id="fixedDiameterVal"></span></label>
           <input type="number" id="fixedDiameter" min="0.1" max="2" step="0.01" />
         </div>
-      </section>
+      </details>
 
       <details class="advanced">
         <summary>Advanced</summary>
@@ -182,8 +188,8 @@
         <p class="hint">Cut-time estimate calibrated against two real xTool 20W fiber + rotary jobs — rough, ±10%. Match speed/passes to your actual job for a same-ballpark estimate.</p>
       </details>
 
-      <section class="ctrl">
-        <h2>Live readout</h2>
+      <details class="ctrl" open data-mobile="open">
+        <summary>Live readout</summary>
         <div class="readout">
           <div class="label">Canvas</div><div class="value" id="roCanvas">-</div>
           <div class="label">Sample grid</div><div class="value" id="roGrid">-</div>
@@ -193,9 +199,10 @@
           <div class="label">Est. cut time</div><div class="value" id="roCutTime">-</div>
           <div class="label">Generation</div><div class="value" id="roGenTime">-</div>
         </div>
-      </section>
+      </details>
 
-      <section class="ctrl">
+      <!-- Becomes a fixed bottom bar on phones so export is always one tap away. -->
+      <section class="ctrl export-bar" id="exportBar">
         <button class="primary" id="exportBtn">Export SVG</button>
       </section>
     </aside>
@@ -230,6 +237,7 @@
         </div>
         <div class="flat-foot">
           <label class="tilecheck"><input type="checkbox" id="tile2x" /> Tile 2× to verify the seam</label>
+          <span class="scroll-hint">Swipe the preview sideways to pan around the can.</span>
           <span class="crop-readout" id="cropReadout"></span>
         </div>
       </div>
@@ -244,7 +252,7 @@
           <span>Rotate</span>
           <input type="range" id="rotate" min="0" max="1" step="0.001" value="0" />
         </div>
-        <p class="hint">Drag the can to spin it, or use the slider.</p>
+        <p class="hint">Drag or swipe the can to spin it, or use the slider.</p>
       </div>
     </main>
   </div>
