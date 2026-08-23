@@ -171,7 +171,7 @@ function build(ctx: FieldCtx): Float32Array {
 
 export const saguaro: Preset = {
   id: 'saguaro',
-  name: 'Saguaro',
+  name: 'Desert',
   group: 'nature',
   description: 'Desert sundown: black saguaro silhouettes against a banded sky and a slotted sun.',
   stipple: { pitchMm: 1.25, dMin: 0.26, dMax: 0.5, jitter: 0.1, thresh: 0.09, mode: 'hybrid', knee: 0.46, gamma: 0.66 },

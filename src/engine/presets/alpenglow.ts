@@ -127,7 +127,7 @@ function build(ctx: FieldCtx): Float32Array {
 
 export const alpenglow: Preset = {
   id: 'alpenglow',
-  name: 'Alpenglow',
+  name: 'Ridgeline',
   group: 'nature',
   description: 'Layered mountain ridgelines silhouetted against a low sun, stars in the far sky.',
   stipple: { pitchMm: 1.35, dMin: 0.26, dMax: 0.52, jitter: 0.14, thresh: 0.1, mode: 'hybrid', knee: 0.4, gamma: 0.6 },

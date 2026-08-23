@@ -105,7 +105,7 @@ function build(ctx: FieldCtx): Float32Array {
 
 export const girih: Preset = {
   id: 'girih',
-  name: 'Girih',
+  name: 'Star Lattice',
   group: 'art',
   description: 'Islamic eight-point star tessellation with dark strapwork — seamless by construction.',
   stipple: { pitchMm: 1.2, dMin: 0.26, dMax: 0.5, jitter: 0.08, thresh: 0.07, mode: 'hybrid', knee: 0.44, gamma: 0.7 },
