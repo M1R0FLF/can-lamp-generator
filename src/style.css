@@ -293,6 +293,8 @@ main.preview { flex: 1; padding: 12px 22px 40px; min-width: 0; overflow-y: auto;
 /* Vertical crop rail sitting alongside the flat preview. The slider is a
    real <input type=range> rotated by writing-mode; direction:rtl puts the
    maximum (top of the design) at the top of the track. */
+.can-row { display: flex; align-items: center; justify-content: center; min-width: 0; }
+
 .crop-rail {
   display: flex;
   flex-direction: column;
@@ -423,6 +425,13 @@ input[type="range"].vslider {
      was all panning and no overview. With only the 3D can left, the
      Both/Flat/3D toggle has nothing to switch between. */
   .preview-toolbar { display: none; }
+
+  /* main.ts moves the crop rail in here when the flat pane goes away, so the
+     band-selection control survives on a phone. Rail beside the can, its
+     readout under it. */
+  .can-row { gap: 10px; }
+  .can-row .crop-rail { flex: 0 0 auto; }
+  #canBlock > .crop-readout { display: block; margin-top: 8px; }
 
   .rotate-row { max-width: none; }
 }

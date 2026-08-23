@@ -168,14 +168,42 @@ function regenerate(ppm: number) {
   renderPreviews();
 }
 
+/**
+ * Put the crop rail wherever the thing it annotates actually is.
+ *
+ * On wide screens it sits beside the flat preview. Phones hide that pane
+ * (effectiveViewMode), which would strand the ONLY control for choosing which
+ * band of the 142mm design lands on a shorter can — so on the stacked layout
+ * the rail moves next to the 3D can instead. You lose the preview of what is
+ * being cropped away, but you keep the choice.
+ *
+ * This moves the one existing element rather than adding a second slider, so
+ * there is still a single #panY input and the existing handler is untouched.
+ */
+function placeCropRail() {
+  const stacked = isStacked();
+  const move = (node: HTMLElement, selector: string) => {
+    const target = document.querySelector(selector);
+    if (target && node.parentElement !== target) target.appendChild(node);
+  };
+  move(el('cropRail'), stacked ? '.can-row' : '.flat-row');
+  // The readout lives in .flat-foot, which is inside the hidden flat pane — a
+  // slider with no indication of the range it keeps is not much of a control.
+  move(el('cropReadout'), stacked ? '#canBlock' : '.flat-foot');
+}
+
 function renderCropRail() {
+  placeCropRail();
   const cw = result?.cropWindow ?? null;
   el('cropRail').style.display = cw ? 'flex' : 'none';
   el<HTMLCanvasElement>('flatCanvas').classList.toggle('croppable', !!cw);
   if (cw && result) {
+    // On phones there is no lit band to drag — only the slider — so the hint
+    // must not tell you to drag something that isn't on screen.
+    const how = isStacked() ? 'use the slider' : 'drag the lit band or the slider';
     setText(
       'cropReadout',
-      `Keeping ${cw.fromMm.toFixed(0)}–${cw.toMm.toFixed(0)} mm of the ${result.designH.toFixed(0)} mm design — drag the lit band or the slider`
+      `Keeping ${cw.fromMm.toFixed(0)}–${cw.toMm.toFixed(0)} mm of the ${result.designH.toFixed(0)} mm design — ${how}`
     );
   } else {
     setText('cropReadout', '');
@@ -419,6 +447,13 @@ function renderPreviews() {
       heightMm: state.heightMm,
       maxHeightPx,
     });
+    // Stacked, the rail annotates the CAN, not the flat pane whose height the
+    // branch above would normally have set — so match the stage instead.
+    if (isStacked()) {
+      const stage = el('can3dMount').firstElementChild as HTMLElement | null;
+      const h = stage?.clientHeight || el('can3dMount').clientHeight;
+      if (h > 0) el('cropRail').style.height = `${h}px`;
+    }
   }
 }
 
@@ -1113,6 +1148,9 @@ window.addEventListener('resize', debounce(() => {
     // (effectiveViewMode), so the panes and the 3D can's height both need
     // recomputing — and the flat raster has to be built if it just came back.
     applyViewMode();
+    // ...and the crop rail has to move back to whichever pane it annotates,
+    // with the wording that matches (renderCropRail -> placeCropRail).
+    renderCropRail();
     renderPreviews();
   });
 }
