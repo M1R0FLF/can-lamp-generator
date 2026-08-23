@@ -60,6 +60,7 @@
         <div class="segmented" id="sourceSeg">
           <button data-source="preset" class="active">Preset</button>
           <button data-source="custom">Make your own</button>
+          <button data-source="photo">Your photo</button>
         </div>
 
         <div id="presetPane" style="margin-top:10px;">
@@ -99,6 +100,127 @@
           </div>
           <p class="hint">Wraps around the can like everything else — 0% and 100% both
             sit at the seam on the back.</p>
+        </div>
+      </details>
+
+      <details class="ctrl" id="photoPane" open data-mobile="open" style="display:none;">
+        <summary>Your photo</summary>
+
+        <div class="dropzone" id="photoDrop" tabindex="0" role="button"
+             aria-label="Choose an image, or drop one here">
+          <strong>Drop an image here</strong>
+          <span>or click to choose a file</span>
+        </div>
+        <input type="file" id="photoFile" accept="image/*" style="display:none;" />
+        <p class="hint" id="photoStatus">A face or a bold, high-contrast subject works best.</p>
+
+        <div id="photoProps" style="display:none;">
+          <div class="field" style="margin-top:10px;">
+            <label>How it fills the can</label>
+            <div class="segmented" id="photoFitSeg">
+              <button data-fit="cover" class="active">Fill</button>
+              <button data-fit="contain">Fit whole</button>
+              <button data-fit="stretch">Stretch</button>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:10px;">
+            <label>At the seam (the back)</label>
+            <div class="segmented" id="photoSeamSeg">
+              <button data-seam="fade" class="active">Fade out</button>
+              <button data-seam="mirror">Mirror</button>
+              <button data-seam="stretch">Wrap full</button>
+            </div>
+          </div>
+          <p class="hint" id="photoSeamHint"></p>
+
+          <div class="row2">
+            <div class="field">
+              <label>Zoom <span class="val" id="photoZoomVal"></span></label>
+              <input type="range" id="photoZoom" min="0.4" max="3" step="0.02" />
+            </div>
+            <div class="field">
+              <label>Width on the can <span class="val" id="photoCoverageVal"></span></label>
+              <input type="range" id="photoCoverage" min="0.2" max="1" step="0.01" />
+            </div>
+          </div>
+
+          <div class="row2">
+            <div class="field">
+              <label>Move sideways <span class="val" id="photoOffsetXVal"></span></label>
+              <input type="range" id="photoOffsetX" min="-0.5" max="0.5" step="0.01" />
+            </div>
+            <div class="field">
+              <label>Move up/down <span class="val" id="photoOffsetYVal"></span></label>
+              <input type="range" id="photoOffsetY" min="-0.5" max="0.5" step="0.01" />
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:12px;">
+            <label>Simplify <span class="val" id="photoPosterizeVal"></span></label>
+            <input type="range" id="photoPosterize" min="2" max="12" step="1" />
+          </div>
+          <p class="hint">Fewer tone steps read better from across a room — the can only
+            has about 160&times;120 dots to work with.</p>
+
+          <div class="row2">
+            <div class="field">
+              <label>Punch <span class="val" id="photoGammaVal"></span></label>
+              <input type="range" id="photoGamma" min="0.6" max="3.2" step="0.05" />
+            </div>
+            <div class="field">
+              <label>Local contrast <span class="val" id="photoLocalContrastVal"></span></label>
+              <input type="range" id="photoLocalContrast" min="0" max="1.5" step="0.05" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Darken the edges <span class="val" id="photoVignetteVal"></span></label>
+            <input type="range" id="photoVignette" min="0" max="1" step="0.05" />
+          </div>
+
+          <div class="row2" style="margin-top:10px;">
+            <button class="secondary" id="photoInvert">Invert</button>
+            <button class="secondary" id="photoReset">Reset look</button>
+          </div>
+
+          <details class="advanced" style="margin-top:12px;">
+            <summary>Fine tuning</summary>
+            <div class="field">
+              <label>Auto black &amp; white point</label>
+              <div class="segmented" id="photoAutoLevelsSeg">
+                <button data-auto="1" class="active">Auto</button>
+                <button data-auto="0">Manual</button>
+              </div>
+            </div>
+            <div class="row2" id="photoLevelsFields" style="display:none;">
+              <div class="field">
+                <label>Black point <span class="val" id="photoBlackPointVal"></span></label>
+                <input type="range" id="photoBlackPoint" min="0" max="0.5" step="0.01" />
+              </div>
+              <div class="field">
+                <label>White point <span class="val" id="photoWhitePointVal"></span></label>
+                <input type="range" id="photoWhitePoint" min="0.5" max="1" step="0.01" />
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label>Contrast radius <span class="val" id="photoLocalContrastRadiusVal"></span></label>
+                <input type="range" id="photoLocalContrastRadius" min="8" max="70" step="1" />
+              </div>
+              <div class="field">
+                <label>Edge boost <span class="val" id="photoEdgeBoostVal"></span></label>
+                <input type="range" id="photoEdgeBoost" min="0" max="0.8" step="0.02" />
+              </div>
+            </div>
+            <div class="field">
+              <label>Shadow floor <span class="val" id="photoAmbientVal"></span></label>
+              <input type="range" id="photoAmbient" min="0" max="0.4" step="0.01" />
+            </div>
+            <p class="hint">Shadow floor keeps big dark areas from going completely
+              blank. Edge boost traces outlines, which survive the dot grid better
+              than fine shading does.</p>
+          </details>
         </div>
       </details>
 
