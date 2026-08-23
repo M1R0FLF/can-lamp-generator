@@ -1,6 +1,13 @@
 import './style.css';
 import { inject as injectAnalytics } from '@vercel/analytics';
-import { generate, GenerateResult, SourceSpec, resultToSvg, DESIGN_HEIGHT_MM } from './engine/generate';
+import {
+  generate,
+  GenerateResult,
+  SourceSpec,
+  resultToSvg,
+  DESIGN_HEIGHT_MM,
+  AnnotationSpec,
+} from './engine/generate';
 import { PRESETS, getPreset } from './engine/presets';
 import { Hole, StippleMode, StippleParams, DEFAULT_STIPPLE } from './engine/stipple';
 import { renderGlow } from './engine/glow';
@@ -50,6 +57,7 @@ type SourceKind = 'preset' | 'custom';
 type HoleMode = 'varying' | 'fixed';
 type PreviewMode = 'lit' | 'unlit' | 'field';
 type ViewMode = 'both' | 'flat' | 'can';
+type AnnotationAnchor = AnnotationSpec['yAnchor'];
 
 interface State {
   diameterMm: number;
@@ -74,6 +82,15 @@ interface State {
   /** which band of the 142mm reference design shows on a shorter can: 0=bottom, 1=top */
   panY: number;
   canStyleId: string;
+  /** empty string = no annotation drawn, on either preset or custom sources */
+  annotationText: string;
+  annotationXFrac: number;
+  annotationYAnchor: AnnotationAnchor;
+  annotationYOffsetMm: number;
+  annotationSizeMm: number;
+  ledHoleEnabled: boolean;
+  ledHoleDiameterMm: number;
+  ledHoleMarginMm: number;
 }
 
 const state: State = {
@@ -97,6 +114,17 @@ const state: State = {
   paletteCategory: 'basic',
   panY: 0,
   canStyleId: CAN_STYLES[0].id,
+  annotationText: '',
+  annotationXFrac: 0.5,
+  annotationYAnchor: 'center',
+  annotationYOffsetMm: 0,
+  annotationSizeMm: 16,
+  ledHoleEnabled: false,
+  // 3mm cable (per spec) + ~0.4mm clearance so it actually slides through
+  // 0.1mm aluminium plus any grommet — tune in Advanced if that's too tight
+  // or too loose once you've test-cut one.
+  ledHoleDiameterMm: 3.4,
+  ledHoleMarginMm: 10,
 };
 
 let result: GenerateResult | null = null;
@@ -158,10 +186,30 @@ function regenerate(ppm: number) {
     state.sourceKind === 'custom'
       ? { kind: 'custom', shapes: state.shapes }
       : { kind: 'preset', presetId: state.presetId };
+  const annotation: AnnotationSpec | undefined = state.annotationText.trim()
+    ? {
+        text: state.annotationText.trim(),
+        xFrac: state.annotationXFrac,
+        yAnchor: state.annotationYAnchor,
+        yOffsetMm: state.annotationYOffsetMm,
+        sizeMm: state.annotationSizeMm,
+      }
+    : undefined;
   result = generate(
-    { diameterMm: state.diameterMm, heightMm: state.heightMm, ppm, panY: state.panY },
+    {
+      diameterMm: state.diameterMm,
+      heightMm: state.heightMm,
+      ppm,
+      panY: state.panY,
+      ledHole: {
+        enabled: state.ledHoleEnabled,
+        diameterMm: state.ledHoleDiameterMm,
+        marginBottomMm: state.ledHoleMarginMm,
+      },
+    },
     source,
-    effectiveStipple()
+    effectiveStipple(),
+    annotation
   );
   renderCropRail();
   renderReadout();
@@ -493,6 +541,12 @@ function syncInputs() {
   set('laserSpeed', String(state.laserSpeed));
   set('laserPasses', String(state.laserPasses));
   set('panY', String(state.panY));
+  set('annotationText', state.annotationText);
+  set('annotationX', String(state.annotationXFrac));
+  set('annotationSize', String(state.annotationSizeMm));
+  set('annotationOffset', String(state.annotationYOffsetMm));
+  set('ledHoleDiameter', state.ledHoleDiameterMm.toFixed(1));
+  set('ledHoleMargin', state.ledHoleMarginMm.toFixed(1));
 
   setText('diameterVal', `${state.diameterMm.toFixed(1)} mm`);
   setText('heightVal', `${state.heightMm.toFixed(1)} mm`);
@@ -520,6 +574,11 @@ function syncInputs() {
   setText('laserSpeedVal', `${state.laserSpeed} mm/s`);
   setText('laserPassesVal', String(state.laserPasses));
   setText('presetDesc', getPreset(state.presetId).description);
+  setText('annotationXVal', `${Math.round(state.annotationXFrac * 100)}%`);
+  setText('annotationSizeVal', `${state.annotationSizeMm.toFixed(0)} mm`);
+  setText('annotationOffsetVal', `${state.annotationYOffsetMm >= 0 ? '+' : ''}${state.annotationYOffsetMm.toFixed(0)} mm`);
+  setText('ledHoleDiameterVal', `${state.ledHoleDiameterMm.toFixed(1)} mm`);
+  setText('ledHoleMarginVal', `${state.ledHoleMarginMm.toFixed(1)} mm`);
 }
 
 function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T {
@@ -633,6 +692,56 @@ el<HTMLSelectElement>('toneMode').addEventListener('change', () => {
 numInput('minWebTarget', (v) => (state.minWebTarget = v), true);
 numInput('laserSpeed', (v) => (state.laserSpeed = v), true);
 numInput('laserPasses', (v) => (state.laserPasses = Math.round(v)), true);
+
+// ---------- annotation (name/date text, works on preset or custom alike) ----------
+function applyAnnotationProps() {
+  el('annotationProps').style.display = state.annotationText.trim() ? 'block' : 'none';
+}
+
+el<HTMLInputElement>('annotationText').addEventListener('input', (e) => {
+  state.annotationText = (e.target as HTMLInputElement).value;
+  applyAnnotationProps();
+  draftThenFull();
+});
+
+el<HTMLInputElement>('annotationX').addEventListener('input', () => {
+  state.annotationXFrac = parseFloat(el<HTMLInputElement>('annotationX').value);
+  syncInputs();
+  draftThenFull();
+});
+
+el<HTMLInputElement>('annotationSize').addEventListener('input', () => {
+  state.annotationSizeMm = parseFloat(el<HTMLInputElement>('annotationSize').value);
+  syncInputs();
+  draftThenFull();
+});
+
+el<HTMLInputElement>('annotationOffset').addEventListener('input', () => {
+  state.annotationYOffsetMm = parseFloat(el<HTMLInputElement>('annotationOffset').value);
+  syncInputs();
+  draftThenFull();
+});
+
+el('annotationAnchorSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.annotationYAnchor = (btn as HTMLElement).dataset.anchor as AnnotationAnchor;
+  for (const b of el('annotationAnchorSeg').querySelectorAll('button')) b.classList.toggle('active', b === btn);
+  draftThenFull();
+});
+
+// ---------- LED wire hole ----------
+el('ledHoleSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.ledHoleEnabled = (btn as HTMLElement).dataset.led === 'on';
+  for (const b of el('ledHoleSeg').querySelectorAll('button')) b.classList.toggle('active', b === btn);
+  el('ledHoleHint').style.display = state.ledHoleEnabled ? 'block' : 'none';
+  draftThenFull();
+});
+
+numInput('ledHoleDiameter', (v) => (state.ledHoleDiameterMm = v), true);
+numInput('ledHoleMargin', (v) => (state.ledHoleMarginMm = v), true);
 
 // source toggle
 el('sourceSeg').addEventListener('click', (e) => {
@@ -1174,6 +1283,7 @@ el<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
 // ---------- init ----------
 injectAnalytics(); // no-ops locally; only sends events once served from Vercel
 applyViewMode();
+applyAnnotationProps();
 syncInputs();
 regenerate(PPM_FULL);
 (window as any).__state = state;

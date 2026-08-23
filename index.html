@@ -38,6 +38,19 @@
           Straight cylindrical section only — neck taper and base flare excluded.
           Perforating a taper puts the galvo out of focus.
         </div>
+
+        <div class="field" style="margin-top:10px;">
+          <label>Back-of-can features</label>
+          <div class="segmented" id="ledHoleSeg">
+            <button data-led="off" class="active">None</button>
+            <button data-led="on">LED wire hole</button>
+          </div>
+        </div>
+        <p class="hint" id="ledHoleHint" style="display:none;">
+          Assumes the can stands with this design facing forward — the flat design's
+          centre, below, is the <b>front</b>. The hole is cut low on the wall near the
+          seam, i.e. the <b>back</b>, sized for a 3mm cable (adjustable in Advanced).
+        </p>
       </details>
 
       <details class="ctrl" open data-mobile="open">
@@ -50,6 +63,40 @@
         <div id="presetPane" style="margin-top:10px;">
           <select id="preset"></select>
           <p class="hint" id="presetDesc"></p>
+        </div>
+      </details>
+
+      <details class="ctrl" open>
+        <summary>Personalize</summary>
+        <div class="field">
+          <label>Your text (optional)</label>
+          <input type="text" id="annotationText" maxlength="24" placeholder="a name, a date…" />
+        </div>
+        <div id="annotationProps" style="display:none;margin-top:10px;">
+          <div class="field">
+            <label>Vertical position</label>
+            <div class="segmented" id="annotationAnchorSeg">
+              <button data-anchor="top">Top</button>
+              <button data-anchor="center" class="active">Center</button>
+              <button data-anchor="bottom">Bottom</button>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label>Around the can <span class="val" id="annotationXVal"></span></label>
+              <input type="range" id="annotationX" min="0" max="1" step="0.01" />
+            </div>
+            <div class="field">
+              <label>Offset <span class="val" id="annotationOffsetVal"></span></label>
+              <input type="range" id="annotationOffset" min="-40" max="40" step="1" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Letter height <span class="val" id="annotationSizeVal"></span></label>
+            <input type="range" id="annotationSize" min="8" max="40" step="1" />
+          </div>
+          <p class="hint">Wraps around the can like everything else — 0% and 100% both
+            sit at the seam on the back.</p>
         </div>
       </details>
 
@@ -186,6 +233,18 @@
           </div>
         </div>
         <p class="hint">Cut-time estimate calibrated against two real xTool 20W fiber + rotary jobs — rough, ±10%. Match speed/passes to your actual job for a same-ballpark estimate.</p>
+        <div class="row2">
+          <div class="field">
+            <label>LED hole Ø (mm) <span class="val" id="ledHoleDiameterVal"></span></label>
+            <input type="number" id="ledHoleDiameter" min="1" max="10" step="0.1" />
+          </div>
+          <div class="field">
+            <label>LED hole margin (mm) <span class="val" id="ledHoleMarginVal"></span></label>
+            <input type="number" id="ledHoleMargin" min="2" max="60" step="0.5" />
+          </div>
+        </div>
+        <p class="hint">Margin is measured from the hole's centre to the can's bottom
+          edge. Only cut when the LED wire hole toggle (in <b>Can</b>) is on.</p>
       </details>
 
       <details class="ctrl" open data-mobile="open">

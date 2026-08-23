@@ -157,6 +157,42 @@ composition judgment, not a density one. Catch it the way it was caught here: ge
 preset, look at the flat unlit/lit render, and ask whether it reads as one or two big
 shapes from across the room (rule 3) or dissolves into noise.
 
+### 9. The can has a front and a back — and one real hole isn't a stipple hole
+
+Most cans stand on a shelf facing one way, and a lamp built from one has an LED strip
+inside whose power cable has to exit *somewhere*. It exits the back, low on the wall.
+
+**Front/back convention**: the flat design is authored to be viewed centred at
+`x = W/2` — that's the front. The seam at `x = 0` / `x = W` (the same physical point
+once rolled into a cylinder) is the back. This costs nothing to keep true: don't place
+a second hero shape or bright element right at the seam, the way you already avoid
+stacking two bright elements on top of each other (rule 3b).
+
+**The LED wire hole** (toggle in the UI, `CanSpec.ledHole` in
+[generate.ts](src/engine/generate.ts)) is a single real through-cut sized for a 3mm
+cable — nothing to do with the stippled pattern, and it must stay that way:
+
+- It sits a few mm off the *exact* seam (`x = min(6, W * 0.05)`), not on it. A cut
+  exactly at x=0 would need to be authored as two half-moons, one at each edge of the
+  flat sheet, that only become a full circle after rolling — doable, but a needless way
+  to risk a botched cut on a real can for a feature that only needs to unambiguously
+  read as "the back," not hit 180° exactly.
+- It's pushed into `holes`/`designHoles` **after** `computeMinWeb()` runs, not before.
+  `computeMinWeb` measures the closest edge-to-edge gap between EVERY pair of holes —
+  feed it a deliberate 3.4mm cutout and the "closest pair" becomes the wire hole
+  against itself, reporting a large negative number and painting the readout red for
+  no real reason. The fix is ordering, not a special case in the distance math.
+- Position is computed from the physical can's real height (`H`), never the preset's
+  142mm reference frame — see the `fromMm` handling in `generate()`. Without that, the
+  hole would drift relative to the actual bottom edge on any preset being cropped down
+  from its reference height.
+
+The same `fromMm`-aware positioning is what lets **the Personalize text annotation**
+(also in generate.ts) say "bottom" and mean the can's actual bottom, regardless of
+cropping — and it deliberately runs on the built `field`, not as a separate render
+layer, so it gets the ordinary treatment: rule 6 band-limiting, rule 4's moat, and
+rule 3's bold weight (thin fonts dissolve exactly like thin outlines do).
+
 ---
 
 ## Port plan
@@ -199,6 +235,14 @@ Do not build the UI first.
 - **Live readout**: hole count + measured min web, red when under target
 - **Preview**: unlit (dots on metal) / lit (backlit glow) toggle, and a cylinder mock-up
 - **Export**: SVG at exact mm dimensions, `viewBox = "0 0 W H"`
+- **Personalize**: an optional short text label (name/date), composited on top of preset
+  or custom alike — position as a fraction of circumference, vertical anchor + offset,
+  letter height. See rule 9.
+- **Back-of-can features**: LED wire hole toggle (rule 9), diameter/margin in Advanced.
+
+(This list predates the preset library, the custom shape editor, and mobile support,
+none of which it describes — treat it as a historical starting spec, not current UI
+inventory. The two bullets above are the exception, added when those features shipped.)
 
 ## Constraints
 
