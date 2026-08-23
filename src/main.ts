@@ -90,7 +90,6 @@ interface State {
   annotationSizeMm: number;
   ledHoleEnabled: boolean;
   ledHoleDiameterMm: number;
-  ledHoleMarginMm: number;
 }
 
 const state: State = {
@@ -124,7 +123,6 @@ const state: State = {
   // 0.1mm aluminium plus any grommet — tune in Advanced if that's too tight
   // or too loose once you've test-cut one.
   ledHoleDiameterMm: 3.4,
-  ledHoleMarginMm: 10,
 };
 
 let result: GenerateResult | null = null;
@@ -204,7 +202,6 @@ function regenerate(ppm: number) {
       ledHole: {
         enabled: state.ledHoleEnabled,
         diameterMm: state.ledHoleDiameterMm,
-        marginBottomMm: state.ledHoleMarginMm,
       },
     },
     source,
@@ -393,6 +390,53 @@ function unlitOverlay(holes: Hole[], W: number, H: number, sp: number): HTMLCanv
   return c;
 }
 
+/**
+ * Draw the LED wire-hole notch as a flat, non-glowing D-shape — deliberately
+ * NOT run through renderGlow. Once assembled a wire fills this opening and
+ * blocks the light it would otherwise pass, so showing it as a bright glow
+ * dot (like every stipple hole) misrepresents the finished lamp; the fix is
+ * to leave it out of the glow pipeline entirely, not dim it. Still drawn in
+ * Unlit/Field, where it IS honestly an opening in bare metal.
+ *
+ * `yFlatMm` is where the physical can's bottom edge falls in THIS canvas's
+ * own coordinate space — same value `overlayCrop` uses for its "kept" edge
+ * (`designH - fromMm`, which is just `H` when nothing is cropped), so the
+ * notch lines up with the crop-window outline rather than needing its own
+ * separate derivation.
+ */
+function drawLedNotch(
+  canvas: HTMLCanvasElement,
+  notch: { x: number; r: number },
+  yFlatMm: number,
+  W: number,
+  sp: number,
+  tiles: number,
+  unlit: boolean,
+  alpha = 1
+) {
+  const ctx = canvas.getContext('2d')!;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = unlit ? '#141311' : '#000';
+  ctx.strokeStyle = unlit ? '#4a463f' : '#333';
+  ctx.lineWidth = Math.max(1, 0.12 * notch.r * sp);
+  const cy = yFlatMm * sp;
+  const R = notch.r * sp;
+  for (let t = 0; t < tiles; t++) {
+    const cx = (notch.x + t * W) * sp;
+    ctx.beginPath();
+    // canvas y grows downward, so the default (clockwise) sweep from the left
+    // point (angle PI) to the right point (2*PI) passes through the TOP —
+    // the semicircle bulging up into the design, away from the excluded area
+    // below y=H. Matches the SVG path in svg.ts's notchPath().
+    ctx.arc(cx, cy, R, Math.PI, Math.PI * 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 /** Dim the parts of the design the current crop window throws away, and
  * outline the part that survives, so the crop is visible rather than implied. */
 function overlayCrop(canvas: HTMLCanvasElement, r: GenerateResult, sp: number) {
@@ -468,6 +512,11 @@ function renderPreviews() {
     flatCanvas.height = flat.height;
     flatCanvas.getContext('2d')!.drawImage(flat, 0, 0);
     overlayCrop(flatCanvas, r, sp);
+    // Left out of Lit on purpose — see drawLedNotch.
+    if (r.ledNotch && state.previewMode !== 'lit') {
+      const yFlatMm = cropping ? r.designH - r.cropWindow!.fromMm : r.H;
+      drawLedNotch(flatCanvas, r.ledNotch, yFlatMm, r.W, sp, tiles, state.previewMode === 'unlit');
+    }
 
     // keep the rail's track the same height as the preview it annotates
     el('cropRail').style.height = `${flat.height}px`;
@@ -479,6 +528,14 @@ function renderPreviews() {
   const texture = lit
     ? renderGlow(dotsCanvas(r.holes, r.W, r.H, texSp, 1), texSp)
     : unlitOverlay(r.holes, r.W, r.H, texSp);
+  // unlitOverlay is transparent-background, composited over the coloured can
+  // body — draw the notch into that same overlay so it isn't lost against it.
+  // Left out of `lit` on purpose, same as the flat view; see drawLedNotch.
+  if (r.ledNotch && !lit) {
+    // 0.85 alpha matches unlitOverlay's own hole-dot fill, so the notch reads
+    // as part of the same texture rather than a harder-edged patch on top.
+    drawLedNotch(texture, r.ledNotch, r.H, r.W, texSp, 1, true, 0.85);
+  }
 
   if (can3d) {
     // give the can whatever vertical room the pane actually has, so "3D only"
@@ -546,7 +603,6 @@ function syncInputs() {
   set('annotationSize', String(state.annotationSizeMm));
   set('annotationOffset', String(state.annotationYOffsetMm));
   set('ledHoleDiameter', state.ledHoleDiameterMm.toFixed(1));
-  set('ledHoleMargin', state.ledHoleMarginMm.toFixed(1));
 
   setText('diameterVal', `${state.diameterMm.toFixed(1)} mm`);
   setText('heightVal', `${state.heightMm.toFixed(1)} mm`);
@@ -578,7 +634,6 @@ function syncInputs() {
   setText('annotationSizeVal', `${state.annotationSizeMm.toFixed(0)} mm`);
   setText('annotationOffsetVal', `${state.annotationYOffsetMm >= 0 ? '+' : ''}${state.annotationYOffsetMm.toFixed(0)} mm`);
   setText('ledHoleDiameterVal', `${state.ledHoleDiameterMm.toFixed(1)} mm`);
-  setText('ledHoleMarginVal', `${state.ledHoleMarginMm.toFixed(1)} mm`);
 }
 
 function debounce<T extends (...a: any[]) => void>(fn: T, ms: number): T {
@@ -741,7 +796,6 @@ el('ledHoleSeg').addEventListener('click', (e) => {
 });
 
 numInput('ledHoleDiameter', (v) => (state.ledHoleDiameterMm = v), true);
-numInput('ledHoleMargin', (v) => (state.ledHoleMarginMm = v), true);
 
 // source toggle
 el('sourceSeg').addEventListener('click', (e) => {
@@ -899,6 +953,19 @@ function renderEditor() {
     ctx2d.drawImage(src, 0, 0, editorCanvas.width, editorCanvas.height);
   }
 
+  // First-run guidance: with nothing placed yet the canvas is just a black
+  // rectangle, which reads as broken rather than as a drop target. Say what
+  // it is, right where the eye lands.
+  if (state.shapes.length === 0) {
+    ctx2d.save();
+    ctx2d.fillStyle = 'rgba(147, 154, 165, 0.55)';
+    ctx2d.font = `${Math.max(11, Math.min(15, editorCanvas.height / 9))}px -apple-system, "Segoe UI", Roboto, sans-serif`;
+    ctx2d.textAlign = 'center';
+    ctx2d.textBaseline = 'middle';
+    ctx2d.fillText('Drop a shape here to begin', editorCanvas.width / 2, editorCanvas.height / 2);
+    ctx2d.restore();
+  }
+
   // selection outlines
   ctx2d.save();
   ctx2d.lineWidth = 1.5;
@@ -953,13 +1020,22 @@ function refreshComposerUI() {
     const b = document.querySelector<HTMLButtonElement>(`#customPane [data-tool="${tool}"]`);
     if (b) b.disabled = picked.length < min;
   }
+  el<HTMLButtonElement>('deleteShape').disabled = picked.length === 0;
 
-  setText(
-    'selInfo',
-    picked.length === 0
-      ? `${state.shapes.length} shape${state.shapes.length === 1 ? '' : 's'} placed — click one to select`
-      : `${picked.length} of ${state.shapes.length} selected`
-  );
+  // One status line carries all the just-in-time guidance that used to live in
+  // a single dense hint paragraph — which message shows depends on exactly
+  // what the user can do right now, so it teaches the gestures when they
+  // actually apply instead of upfront. innerHTML (not setText) so <b> keeps
+  // working, same as the old static hint did.
+  const n = state.shapes.length;
+  el('selInfo').innerHTML =
+    n === 0
+      ? 'No shapes yet — drag one from the palette above, or tap it to drop one in the middle.'
+      : picked.length === 0
+      ? `${n} shape${n === 1 ? '' : 's'} placed. Tap one to select it — <b>shift-tap</b> to select several.`
+      : picked.length === 1
+      ? '1 shape selected. Drag to move it, arrow keys to nudge, <b>Delete</b> to remove it.'
+      : `${picked.length} of ${n} selected. Align or arrange them below, or <b>Delete</b> to remove them together.`;
 }
 
 /** Rebuild after any structural change to the shape list. */
@@ -992,7 +1068,7 @@ function buildPalette() {
   for (const def of shapesInCategory(state.paletteCategory)) {
     const b = document.createElement('button');
     b.textContent = def.glyph;
-    b.title = `${def.name} — drag onto the canvas`;
+    b.title = `${def.name} — drag onto the canvas, or tap to place it`;
     b.dataset.shape = def.id;
     attachPaletteDrag(b, def.id);
     pal.appendChild(b);
@@ -1036,6 +1112,7 @@ function attachPaletteDrag(btn: HTMLElement, shapeId: string) {
       state.shapes.push(shape);
       state.selectedIds = new Set([shape.id]);
       composerChanged();
+      renderEditor();
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);

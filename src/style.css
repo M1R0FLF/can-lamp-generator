@@ -214,29 +214,79 @@ button.secondary:hover { color: var(--danger); border-color: var(--danger); }
 .palette button:hover { border-color: var(--accent); }
 .palette button.dragging { opacity: 0.4; }
 
-.toolrow { display: flex; align-items: center; gap: 4px; margin-top: 7px; flex-wrap: wrap; }
+/* Each of Align / Arrange / Ring is a .tool-group: a full-width heading
+   (.toolgroup-label, optionally with a dim .toolgroup-hint stating the
+   selection count it needs) followed by its own controls — a .toolrow of
+   labeled pill buttons, or for Ring a plain .field. Splitting heading from
+   controls (rather than one flex row with the label squeezed to one side)
+   is what lets the buttons carry real text instead of bare icons. */
+.tool-group { margin-top: 12px; }
+
 .toolgroup-label {
-  font-size: 9.5px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-dim);
-  width: 46px;
-  flex: none;
+  margin-bottom: 5px;
 }
+.toolgroup-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.toolrow { display: flex; gap: 5px; flex-wrap: wrap; }
 .toolrow button {
   background: var(--panel-2);
   border: 1px solid var(--border);
   color: var(--text);
   border-radius: 4px;
-  min-width: 28px;
-  height: 26px;
-  font-size: 13px;
+  height: 27px;
+  font-size: 11px;
   cursor: pointer;
-  padding: 0 6px;
+  padding: 0 8px;
+  white-space: nowrap;
 }
 .toolrow button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .toolrow button:disabled { opacity: 0.32; cursor: default; }
-.toolrow input[type="number"] { width: 52px; height: 26px; }
+
+/* Ring's copy count + its action button, side by side under one .field label. */
+.ring-row { display: flex; gap: 6px; }
+.ring-row input[type="number"] { flex: 0 0 64px; width: 64px; }
+.ring-row button {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  font-size: 11.5px;
+  cursor: pointer;
+  padding: 0 8px;
+}
+.ring-row button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.ring-row button:disabled { opacity: 0.32; cursor: default; }
+
+/* The status line does the job the old single hint paragraph used to: it
+   sits right under the canvas and always says something — what to do next
+   when nothing is placed yet, how selection works once shapes exist, or
+   what the controls below will do once something is selected. Layered on
+   top of the shared .hint look (untouched) rather than replacing it. */
+#customPane .sel-status {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+#shapeProps { margin-top: 10px; }
 
 #editorWrap { cursor: crosshair; margin-top: 8px; }
 #editorCanvas { touch-action: none; }
@@ -423,8 +473,10 @@ input[type="range"].vslider {
   /* The flat/unwrapped pane is forced off here (see effectiveViewMode in
      main.ts): at 4.6 px/mm only about a third of the wrap fits a phone, so it
      was all panning and no overview. With only the 3D can left, the
-     Both/Flat/3D toggle has nothing to switch between. */
-  .preview-toolbar { display: none; }
+     Both/Flat/3D toggle has nothing left to switch between — but the
+     Lit/Unlit/Field toggle next to it still applies to the 3D can's own
+     texture, so only #viewSeg itself is hidden, not the whole toolbar. */
+  #viewSeg { display: none; }
 
   /* main.ts moves the crop rail in here when the flat pane goes away, so the
      band-selection control survives on a phone. Rail beside the can, its
@@ -478,10 +530,13 @@ input[type="range"].vslider {
   }
   .palette button { font-size: 23px; }
 
-  .toolrow { gap: 6px; margin-top: 10px; }
-  .toolrow button { min-width: 44px; height: 44px; font-size: 17px; }
-  .toolrow input[type="number"] { width: 68px; height: 44px; }
-  .toolgroup-label { width: 100%; font-size: 10px; }
+  .tool-group { margin-top: 14px; }
+  .toolgroup-label { font-size: 11px; }
+  .toolgroup-hint { font-size: 10.5px; }
+  .toolrow { gap: 7px; }
+  .toolrow button { min-width: 44px; min-height: 44px; height: auto; font-size: 13.5px; padding: 0 12px; }
+  .ring-row input[type="number"] { flex-basis: 76px; width: 76px; height: 44px; font-size: 16px; }
+  .ring-row button { min-height: 44px; font-size: 13px; }
 
   .readout { font-size: 13px; row-gap: 8px; }
 
