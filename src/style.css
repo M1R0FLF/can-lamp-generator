@@ -343,7 +343,13 @@ main.preview { flex: 1; padding: 12px 22px 40px; min-width: 0; overflow-y: auto;
 /* Vertical crop rail sitting alongside the flat preview. The slider is a
    real <input type=range> rotated by writing-mode; direction:rtl puts the
    maximum (top of the design) at the top of the track. */
-.can-row { display: flex; align-items: center; justify-content: center; min-width: 0; }
+/* flex-start, not center: .flat-row (the pattern preview above this one) has
+   no justify-content, so ITS content sits flush-left. Centering this row
+   instead would only coincidentally line the can up with the flat preview
+   when the mount happened to fill the whole row — now that the mount gets
+   an explicit width matching the flat canvas (see renderPreviews() in
+   main.ts), flush-left is what actually keeps their left edges together. */
+.can-row { display: flex; align-items: center; justify-content: flex-start; min-width: 0; }
 
 .crop-rail {
   display: flex;
@@ -380,18 +386,19 @@ input[type="range"].vslider {
 .scroll-hint { display: none; font-size: 11px; color: var(--text-dim); }
 
 /*
- * Centred the same way .can-row centres the mount: span the full width and
- * centre the CONTENT within it, rather than capping the row's own width and
- * leaving it flush-left. Those aren't the same thing — a row capped to 420px
- * with no centring just sits at the container's left edge, while .can-row
- * spans the full (much wider) preview column and centres its child in that.
- * Two different alignment strategies on stacked siblings meant the rotate
- * slider's midpoint had no reason to land under the can's, and didn't:
- * reported as "the can mockup isn't above the rotate bar" / "all the way to
- * the right" (the can was centred correctly — just not against what the
- * slider beneath it was doing).
+ * flex-start, matching .flat-foot (the equivalent row under the FLAT
+ * preview, which also has no justify-content — flush-left is the
+ * established pattern for controls under a preview canvas in this layout).
+ * This used to be capped to max-width:420px with no centring, so it sat
+ * flush-left in a box far narrower than .can-row's — which was ALSO
+ * centring at the time. Two different alignment strategies on stacked
+ * siblings meant the rotate slider's midpoint had no reason to land under
+ * the can's, and didn't: reported as "the can mockup isn't above the rotate
+ * bar" / "all the way to the right". Now that .can-row is flush-left too
+ * (see its comment) and the mount takes an explicit width matching the flat
+ * canvas, both rows anchor to the same left edge the same way.
  */
-.rotate-row { display: flex; align-items: center; gap: 10px; margin-top: 7px; justify-content: center; }
+.rotate-row { display: flex; align-items: center; gap: 10px; margin-top: 7px; }
 .rotate-row input[type="range"] { flex: 1; max-width: 380px; }
 .rotate-row span { font-size: 11px; color: var(--text-dim); }
 
@@ -402,13 +409,17 @@ input[type="range"].vslider {
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
-  /* Matches .rotate-row's own max-width below. Without a cap here,
-     render3d.ts's stageW (= mount.clientWidth) grows to fill the whole
-     preview pane on a wide screen, but .rotate-row stays capped at 420px —
-     the can, centred within its own much-wider row, ends up nowhere near
-     centred over the narrower, left-anchored slider beneath it. Reported as
-     "the can is all the way to the right" / "isn't above the rotate bar". */
-  max-width: 420px;
+  /* No max-width: the mount has to be free to grow to whatever width
+     render3d.ts sets .can3d-stage to (now driven by widthPx, matching the
+     flat canvas — see renderPreviews() in main.ts). An earlier version of
+     this rule capped it at 420px on the theory that stageW was uncapped and
+     growing to fill the pane; that theory was wrong (stageW was actually
+     stuck at a ~360px fallback regardless of screen size, a DIFFERENT bug —
+     see the widthPx comment in render3d.ts), and the leftover cap became
+     actively harmful once stageW started reporting its real, correct,
+     much-wider size: this container clips overflow, so the cap was cutting
+     the properly-sized can off at 420px.
+  */
 }
 .can3d-stage {
   position: relative;

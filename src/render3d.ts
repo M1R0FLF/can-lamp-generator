@@ -57,6 +57,8 @@ export interface Can3D {
     heightMm: number;
     /** cap the stage so the can fits the space actually on screen */
     maxHeightPx?: number;
+    /** match the flat preview's own rendered width instead of guessing */
+    widthPx?: number;
   }): void;
 }
 
@@ -129,9 +131,18 @@ export function createCan3D(mount: HTMLElement): Can3D {
     heightMm: number;
     /** cap the stage so the can fits the space actually on screen */
     maxHeightPx?: number;
+    widthPx?: number;
   }) {
     const { texture, lit, style, diameterMm, heightMm } = opts;
-    const stageW = Math.max(240, mount.clientWidth || 360);
+    // mount.clientWidth is a trap here: mount has no width of its own in
+    // CSS, so it shrink-wraps THIS stage — meaning clientWidth just echoes
+    // back whatever the stage was PREVIOUSLY sized to, not anything about
+    // actual available space. Left to that fallback chain it converges on
+    // the literal constant 360 forever. opts.widthPx breaks the circularity
+    // by giving an actual external width (main.ts passes the flat preview's
+    // own rendered width, so the two visibly line up and the can gets to be
+    // as big as the flat pattern next to it, not stuck at a guessed size).
+    const stageW = Math.max(240, opts.widthPx || mount.clientWidth || 360);
     const stageH = Math.min(opts.maxHeightPx ?? 560, Math.max(260, stageW * 1.15));
     stage.style.width = `${stageW}px`;
     stage.style.height = `${stageH}px`;

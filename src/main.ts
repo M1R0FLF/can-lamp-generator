@@ -552,7 +552,12 @@ function renderPreviews() {
     // 250px covers the toolbar, block heading, rotate row, hint and padding
     // that sit around the stage, so "3D only" fits without a scrollbar
     const paneH = pane?.clientHeight ?? 600;
-    const maxHeightPx = view === 'can' ? Math.max(260, paneH - 250) : 520;
+    // "Both" used to hard-cap at 520 regardless of available space. The pane
+    // scrolls (main.preview has overflow-y:auto), so a taller can here isn't
+    // a hard layout risk the way running out of horizontal room would be —
+    // 680 gives it real room to grow instead of a token bump.
+    const maxHeightPx = view === 'can' ? Math.max(260, paneH - 250) : 680;
+    const stacked = isStacked();
     can3d.update({
       texture,
       lit,
@@ -560,6 +565,15 @@ function renderPreviews() {
       diameterMm: state.diameterMm,
       heightMm: state.heightMm,
       maxHeightPx,
+      // Match the flat preview's own rendered width so the two visibly line
+      // up and the can gets to be as big as the pattern next to it, instead
+      // of stuck at whatever mount.clientWidth's circular fallback picks
+      // (see the comment in render3d.ts). Skipped when stacked: the mobile
+      // layout already fits the mount to the (narrow) viewport correctly,
+      // and the flat pane's own width there is much wider than the screen
+      // (it pans, per effectiveViewMode) — forcing the can to match THAT
+      // would blow out the phone layout instead of fixing anything.
+      widthPx: stacked ? undefined : Math.round(r.W * sp),
     });
     // Stacked, the rail annotates the CAN, not the flat pane whose height the
     // branch above would normally have set — so match the stage instead.
