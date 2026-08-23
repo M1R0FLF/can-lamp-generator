@@ -110,7 +110,7 @@ function build(ctx: FieldCtx): Float32Array {
 
 export const deco: Preset = {
   id: 'deco',
-  name: 'Deco',
+  name: 'Art Deco',
   group: 'art',
   description: 'Art Deco sunburst fans, ziggurat steps and stepped fret borders over vertical fluting.',
   stipple: { pitchMm: 1.3, dMin: 0.26, dMax: 0.52, jitter: 0.1, thresh: 0.08, mode: 'hybrid', knee: 0.42, gamma: 0.7 },

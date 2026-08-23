@@ -149,7 +149,7 @@ function build(ctx: FieldCtx): Float32Array {
 
 export const seigaiha: Preset = {
   id: 'seigaiha',
-  name: 'Seigaiha',
+  name: 'Waves',
   group: 'art',
   description: 'Japanese wave scallops under a full moon, with koi cutting across the current.',
   stipple: { pitchMm: 1.25, dMin: 0.26, dMax: 0.5, jitter: 0.1, thresh: 0.07, mode: 'hybrid', knee: 0.42, gamma: 0.7 },
