@@ -296,6 +296,45 @@ export function wedge(
   poly(d, [...outer, ...inner.reverse()], fill);
 }
 
+/**
+ * Bold, centred label — for a user-supplied name/date, not a decorative motif.
+ *
+ * Weight is forced to 900: rule 3 (big closed forms read, filigree does not)
+ * applies to letterforms exactly like any other shape, and a thin font
+ * dissolves at stipple pitch the same way a thin outline does. `maxWidthMm`
+ * shrinks the font so a long string can't explode across the seam; pass
+ * Infinity to disable. Uses `wrapDraw`, so text straddling x=0/W wraps for
+ * free like every other primitive here.
+ */
+export function label(
+  d: DrawCtx,
+  s: string,
+  cx: number,
+  cy: number,
+  heightMm: number,
+  maxWidthMm = Infinity,
+  fill = 255
+) {
+  const str = s.trim();
+  if (!str) return;
+  wrapDraw(d, (shift) => {
+    const c = d.ctx;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillStyle = gray(fill);
+    let px = heightMm * d.PPM;
+    const fontStack = (size: number) => `900 ${size}px Arial, "Segoe UI", sans-serif`;
+    c.font = fontStack(px);
+    const widthMm = c.measureText(str).width / d.PPM;
+    if (widthMm > maxWidthMm) {
+      px *= maxWidthMm / widthMm;
+      c.font = fontStack(px);
+    }
+    const [x, y] = toPx(d, cx + shift, cy);
+    c.fillText(str, x, y);
+  });
+}
+
 /** Read the mask back as a 0..1 field. */
 export function maskToField(d: DrawCtx): Float32Array {
   const data = d.ctx.getImageData(0, 0, d.Wp, d.Hp).data;
