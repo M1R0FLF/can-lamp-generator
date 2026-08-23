@@ -574,6 +574,7 @@ function renderPreviews() {
       // (it pans, per effectiveViewMode) — forcing the can to match THAT
       // would blow out the phone layout instead of fixing anything.
       widthPx: stacked ? undefined : Math.round(r.W * sp),
+      ledNotch: r.ledNotch,
     });
     // Stacked, the rail annotates the CAN, not the flat pane whose height the
     // branch above would normally have set — so match the stage instead.

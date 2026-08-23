@@ -450,6 +450,40 @@ input[type="range"].vslider {
   pointer-events: none;
   background: linear-gradient(90deg, rgba(0,0,0,0.5), transparent 18%, transparent 82%, rgba(0,0,0,0.5));
 }
+/* Zero-width positioning line for the LED wire cable — see the comment in
+   render3d.ts for why this is a separate element from the visible wire. */
+.can3d-wire-anchor {
+  position: absolute;
+  transform-style: preserve-3d;
+}
+/* A short cord exiting the notch, pivoting from its own top-center (the
+   attachment point) so render3d.ts's rotateX can swing it from "hanging
+   down" to "pointing out from the can" without the box drifting off the
+   anchor. The cross-axis gradient (dark-light-dark) reads as a rounded
+   cord instead of a flat ribbon; ::after is a small strain-relief/plug
+   nub at the free end so it looks terminated rather than just cut off. */
+.can3d-wire {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 6px;
+  transform-origin: 50% 0%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #b8b4ac, #f8f6f1 45%, #b8b4ac);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+.can3d-wire::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 12px;
+  height: 8px;
+  transform: translateX(-50%);
+  border-radius: 3px;
+  background: linear-gradient(90deg, #1c1c1e, #38383a 50%, #1c1c1e);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
 
 /* ============================================================
    Stacked layout (< 900px)
