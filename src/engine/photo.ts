@@ -252,6 +252,82 @@ export const DEFAULT_PHOTO_PARAMS: PhotoParams = {
   ambient: 0.0,
 };
 
+/**
+ * Border-minus-centre luminance above which a photo is assumed to have a
+ * SUBJECT DARKER THAN ITS BACKGROUND, and wants inverting.
+ *
+ * Why this exists: a perforated can is a light source, so hole density maps to
+ * brightness, and a photograph shot against a bright background therefore
+ * renders the background bright and the subject as a dark hole in it. That is
+ * backwards for a lamp — rules 3b and 4 both want the subject to dominate and
+ * to sit on dark ground — and it is the single largest quality lever on real
+ * photographs, bigger than the choice of dot pattern.
+ *
+ * It went unnoticed for a while because the synthetic portrait used to develop
+ * the tone pipeline was built with a dark background, which is exactly the case
+ * that does NOT need inverting. Two real portraits, both shot against bright
+ * ground, both measured border-minus-centre at +0.197; the dark-background
+ * synthetic measured -0.670. So the classes separate by nearly 0.9 and the
+ * threshold only has to be somewhere sane in between.
+ *
+ * 0.08 sits ~2.5x below the real cases and far above zero, so an evenly-lit or
+ * ambiguous image is left alone rather than flipped on a coin toss.
+ */
+const INVERT_BORDER_MARGIN = 0.08;
+
+/**
+ * Guess whether an image should be inverted, by comparing a border ring
+ * against the middle. Cheap: the decision is made on a 64x64 downscale, since
+ * it is a question about two large regional averages and nothing finer.
+ *
+ * Deliberately measured on the SOURCE image rather than on the placed field:
+ * "is this subject darker than its background" is a property of the
+ * photograph, not of how it happens to be cropped onto the can, and computing
+ * it here means the answer does not shift while the user drags zoom or pan.
+ */
+export function suggestInvert(img: HTMLImageElement | ImageBitmap): boolean {
+  const N = 64;
+  const c = document.createElement('canvas');
+  c.width = N;
+  c.height = N;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  if (!g) return false;
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(img, 0, 0, N, N);
+  const d = g.getImageData(0, 0, N, N).data;
+
+  let ring = 0;
+  let ringN = 0;
+  let mid = 0;
+  let midN = 0;
+  for (let y = 0; y < N; y++) {
+    const ty = y / (N - 1);
+    for (let x = 0; x < N; x++) {
+      const tx = x / (N - 1);
+      const i = (y * N + x) * 4;
+      // same luminance definition as sampleImage(): Rec.709 on LINEAR light,
+      // re-encoded, so this decision and the tone pipeline agree about what
+      // "brighter" means (see the SRGB_* tables above).
+      const Y =
+        0.2126 * SRGB_DECODE[d[i]] +
+        0.7152 * SRGB_DECODE[d[i + 1]] +
+        0.0722 * SRGB_DECODE[d[i + 2]];
+      const v = SRGB_ENCODE[Math.min(4095, Math.max(0, Math.round(Y * 4095)))];
+      const inset = Math.min(tx, 1 - tx, ty, 1 - ty);
+      if (inset < 0.22) {
+        ring += v;
+        ringN++;
+      } else if (inset > 0.3) {
+        mid += v;
+        midN++;
+      }
+    }
+  }
+  if (ringN === 0 || midN === 0) return false;
+  return ring / ringN - mid / midN >= INVERT_BORDER_MARGIN;
+}
+
 export interface PhotoSource {
   /** luminance 0..1 at field resolution */
   luma: Float32Array;

@@ -61,6 +61,11 @@ export default async function ({ run, page, argv }) {
       const ctx = L.photoFieldCtx(can);
       const place = L.placementFor(bmp.width, bmp.height, ctx.W, ctx.H);
       const src = L.sampleImage(bmp, ctx, place);
+      // Mirror what the app does on load, or the harness measures a look no
+      // user will ever see. suggestInvert() is the biggest single lever on a
+      // real photograph, so leaving it out here made every light-background
+      // portrait measure as its broken version.
+      const params = { ...L.DEFAULT_PHOTO_PARAMS, invert: L.suggestInvert(bmp) };
 
       const paint = (holes, lit) => {
         const c = document.createElement('canvas');
@@ -81,7 +86,7 @@ export default async function ({ run, page, argv }) {
       const shots = [];
       const stats = [];
       for (const [gname, dither] of [['classic', 'hash'], ['smooth', 'blue'], ['detail', 'diffusion']]) {
-        const r = L.generate(can, { kind: 'photo', source: src, params: L.DEFAULT_PHOTO_PARAMS }, { ...base, dither });
+        const r = L.generate(can, { kind: 'photo', source: src, params }, { ...base, dither });
         const area = r.holes.reduce((a, h) => a + Math.PI * h.r * h.r, 0);
         stats.push({
           gen: gname,
@@ -93,7 +98,7 @@ export default async function ({ run, page, argv }) {
         shots.push({ tag: `${gname}.lit`, png: L.renderGlow(paint(r.holes, true), SP).toDataURL('image/png') });
         shots.push({ tag: `${gname}.unlit`, png: paint(r.holes, false).toDataURL('image/png') });
       }
-      return { w: bmp.width, h: bmp.height, seam: place.seam, coverage: place.coverage, stats, shots };
+      return { w: bmp.width, h: bmp.height, seam: place.seam, coverage: place.coverage, invert: params.invert, stats, shots };
     }, { arg: { dataUrl, diameter, height } });
 
     const stem = path.basename(name, path.extname(name)).replace(/[^a-zA-Z0-9_-]+/g, '-');
@@ -106,7 +111,7 @@ export default async function ({ run, page, argv }) {
   // rule 8's band and rule 2's floor are the whole point of the table
   const MIN_OPEN = 1.8, MAX_OPEN = 8, MIN_WEB = 0.3;
   for (const r of rows) {
-    console.log(`${r.name}  (${r.w}x${r.h}, placed as ${r.seam}${r.seam === 'fade' ? ` @ ${Math.round(r.coverage * 100)}%` : ''})`);
+    console.log(`${r.name}  (${r.w}x${r.h}, placed as ${r.seam}${r.seam === 'fade' ? ` @ ${Math.round(r.coverage * 100)}%` : ''}${r.invert ? ', auto-inverted' : ''})`);
     for (const s of r.stats) {
       const openFlag = s.openPct < MIN_OPEN ? '  <-- UNDER rule 8 floor' : s.openPct > MAX_OPEN ? '  <-- OVER rule 8 ceiling' : '';
       const webFlag = s.minWeb < MIN_WEB ? '  <-- UNDER rule 2 floor' : '';
