@@ -6,3 +6,11 @@ Thumbs.db
 .vscode/
 *.log
 .claude/*.lock
+
+# Ad-hoc browser smoke scripts. These get written at the repo root so `node`
+# can resolve playwright from node_modules, which means a `git add -A` will
+# happily commit one — it already did once (ui-final.mjs). Real, reusable
+# measurement scripts belong in tools/measure/ and are not matched here.
+/ui-*.mjs
+/e2e*.mjs
+/*-check.mjs
