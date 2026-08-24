@@ -61,7 +61,15 @@ export default async function ({ run, page, argv }) {
       const ctx = L.photoFieldCtx(can);
       const place = L.placementFor(bmp.width, bmp.height, ctx.W, ctx.H);
       const src = L.sampleImage(bmp, ctx, place);
-      const params = { ...L.DEFAULT_PHOTO_PARAMS };
+      // Mirror what the app does on load. Leaving this out measures a look no
+      // user will ever see — auto-Punch moves gamma by nearly a factor of two
+      // between images, so the harness would be reporting the wrong render
+      // entirely. (This is the second time this file has drifted from the app;
+      // if you add another on-load step, add it here too.)
+      const params = {
+        ...L.DEFAULT_PHOTO_PARAMS,
+        gamma: L.solveAutoPunch(bmp, ctx.W, ctx.H, place, L.DEFAULT_PHOTO_PARAMS, base.pitchMm),
+      };
 
       const paint = (holes, lit) => {
         const c = document.createElement('canvas');
@@ -94,7 +102,7 @@ export default async function ({ run, page, argv }) {
         shots.push({ tag: `${gname}.lit`, png: L.renderGlow(paint(r.holes, true), SP).toDataURL('image/png') });
         shots.push({ tag: `${gname}.unlit`, png: paint(r.holes, false).toDataURL('image/png') });
       }
-      return { w: bmp.width, h: bmp.height, seam: place.seam, coverage: place.coverage, stats, shots };
+      return { w: bmp.width, h: bmp.height, seam: place.seam, coverage: place.coverage, punch: params.gamma, stats, shots };
     }, { arg: { dataUrl, diameter, height } });
 
     const stem = path.basename(name, path.extname(name)).replace(/[^a-zA-Z0-9_-]+/g, '-');
@@ -107,7 +115,7 @@ export default async function ({ run, page, argv }) {
   // rule 8's band and rule 2's floor are the whole point of the table
   const MIN_OPEN = 1.8, MAX_OPEN = 8, MIN_WEB = 0.3;
   for (const r of rows) {
-    console.log(`${r.name}  (${r.w}x${r.h}, placed as ${r.seam}${r.seam === 'fade' ? ` @ ${Math.round(r.coverage * 100)}%` : ''})`);
+    console.log(`${r.name}  (${r.w}x${r.h}, placed as ${r.seam}${r.seam === 'fade' ? ` @ ${Math.round(r.coverage * 100)}%` : ''}, auto-Punch ${r.punch})`);
     for (const s of r.stats) {
       const openFlag = s.openPct < MIN_OPEN ? '  <-- UNDER rule 8 floor' : s.openPct > MAX_OPEN ? '  <-- OVER rule 8 ceiling' : '';
       const webFlag = s.minWeb < MIN_WEB ? '  <-- UNDER rule 2 floor' : '';

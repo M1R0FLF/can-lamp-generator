@@ -69,6 +69,19 @@ export interface PhotoParams {
   blackPoint: number;
   whitePoint: number;
   gamma: number;
+  /**
+   * Overall gain, -1..+1, 0 = neutral. A MULTIPLIER rather than an offset:
+   * adding a constant would lift pure black off zero, and rule 5 is explicit
+   * that real blacks (no holes at all) are what make an image read. A gain
+   * leaves black at black and opens up everything above it.
+   */
+  brightness: number;
+  /**
+   * Contrast around mid-tone, -1..+1, 0 = neutral. Pivots at 0.5 in perceptual
+   * space, i.e. the same space posterize quantises in, so the two compose the
+   * way a user expects.
+   */
+  contrast: number;
   /** large-radius unsharp = local contrast / "clarity". 0 = off */
   localContrast: number;
   /**
@@ -257,6 +270,8 @@ export const DEFAULT_PHOTO_PARAMS: PhotoParams = {
   blackPoint: 0.04,
   whitePoint: 0.96,
   gamma: 0.7,
+  brightness: 0,
+  contrast: 0,
   localContrast: 0.45,
   localContrastRadiusMm: 30,
   localContrastEdgeAware: false,
@@ -268,6 +283,139 @@ export const DEFAULT_PHOTO_PARAMS: PhotoParams = {
   vignette: 0.7,
   ambient: 0.0,
 };
+
+/**
+ * Measurement resolution for the auto-Punch solve, in px/mm.
+ *
+ * MUST be kept in step with AUTO_PUNCH_TARGET below — the two are one
+ * calibration, not two independent knobs. Relative local contrast is
+ * resolution-dependent because a lower-resolution field carries less fine
+ * detail: the same approved setting measures 0.2064 here at 2 px/mm and 0.1959
+ * at the render's 8. Changing this constant without re-deriving the target
+ * silently biases every solve (it first shipped mismatched, and drove a
+ * portrait that wanted 0.70 down onto the 0.60 clamp).
+ */
+const PROBE_PPM = 2;
+
+/**
+ * Target for auto-Punch, in units of whole-image relative local contrast
+ * (RMS of the 4mm high-pass over the mean, across the covered area), measured
+ * at PROBE_PPM.
+ *
+ * Anchored on the ONE setting a human has explicitly approved: portrait 1 at
+ * gamma 0.7, which measures 0.2064 at this resolution. Everything else here is
+ * machinery; this number is the whole judgement, so it is the number to change
+ * if results drift.
+ *
+ * A single target transfers between images at all only because the quantity
+ * itself does. Measured on two portraits at the settings each wanted, contrast
+ * came out within 9% of each other despite one being a bespectacled face with
+ * dark hair and the other an evenly-lit studio shot, and despite the two
+ * needing gammas nearly a factor of two apart.
+ *
+ * It is measured over the WHOLE covered area rather than over the subject,
+ * because nothing in production knows where the subject is — this project
+ * cannot have a face detector (CLAUDE.md puts the halftone portrait generator
+ * out of scope precisely because it needs OpenCV). That dilution has a real
+ * cost, and it is worth being honest about its direction: an image with a large
+ * flat background reads LOW, so the solver pushes its gamma further than a
+ * subject-only measurement would. On the second portrait that lands 1.31 where
+ * a face-only match would have said ~1.1 — more contrast and less brightness
+ * than strictly necessary, which is at least the direction that image was
+ * reported as needing. No single whole-image target can reproduce a face-only
+ * match for both; that is the trade this approach makes.
+ */
+export const AUTO_PUNCH_TARGET = 0.2064;
+
+/** Bounds on the solved value, so a pathological image cannot produce a silly one. */
+const AUTO_PUNCH_MIN = 0.6;
+const AUTO_PUNCH_MAX = 1.6;
+
+/** The two gammas the solver probes. Chosen to span the useful range. */
+const PUNCH_PROBES = [0.7, 1.3];
+
+/**
+ * Relative local contrast at ~4mm scale over the covered area: RMS of the
+ * high-pass divided by the mean.
+ *
+ * Normalised by the mean deliberately. Raw RMS scales with overall brightness,
+ * so it scores any change that darkens the image as a loss of contrast even
+ * when the features have become MORE distinct — which is exactly backwards for
+ * choosing a tone curve, and it sent an earlier version of this measurement
+ * the wrong way.
+ */
+function relativeLocalContrast(
+  field: Float32Array,
+  Wp: number,
+  Hp: number,
+  cover: Float32Array,
+  ppm: number
+): number {
+  const r = Math.max(1, Math.round(4 * ppm));
+  const blur = boxBlur(field, Wp, Hp, r, r);
+  let mean = 0;
+  let rms = 0;
+  let n = 0;
+  for (let i = 0; i < field.length; i++) {
+    if (cover[i] <= 0) continue;
+    mean += field[i];
+    const d = field[i] - blur[i];
+    rms += d * d;
+    n++;
+  }
+  if (n === 0) return 0;
+  mean /= n;
+  if (mean <= 1e-6) return 0;
+  return Math.sqrt(rms / n) / mean;
+}
+
+/**
+ * Solve for the `gamma` ("Punch") that lands this image on AUTO_PUNCH_TARGET.
+ *
+ * Punch trades face brightness against face contrast, and which value is right
+ * is a property of the photograph, not a constant: a face with glasses and
+ * dark hair carries its own contrast and wants a low value, while an evenly-lit
+ * studio portrait needs nearly twice as much before its features separate from
+ * the skin. A single default cannot serve both — reported as one image being
+ * right and the other "too bright, you can't see face details".
+ *
+ * Closed loop rather than a heuristic: probe two gammas, measure what actually
+ * comes out of the real tone pipeline, and interpolate. Relative contrast is
+ * very nearly linear in gamma over this range (measured 0.190 -> 0.256 across
+ * 0.6 -> 1.5, and 0.138 -> 0.212 on the other image), so two probes are enough
+ * and a third would only confirm the straight line.
+ *
+ * Runs at PROBE_PPM (2 px/mm) instead of the render's 8, which makes the two
+ * extra field builds about 1/16 the cost each. A 4mm feature is still 8 px
+ * across there, so the measurement holds up while the solve stays a few tens
+ * of milliseconds instead of most of a second — but see PROBE_PPM: the target
+ * is calibrated to that resolution and the two must move together.
+ */
+export function solveAutoPunch(
+  img: HTMLImageElement | ImageBitmap,
+  W: number,
+  H: number,
+  place: PhotoPlacement,
+  params: PhotoParams,
+  pitchMm: number
+): number {
+  const ctx = new FieldCtx(W, H, PROBE_PPM);
+  const src = sampleImage(img, ctx, place);
+  const measured: number[] = [];
+  for (const g of PUNCH_PROBES) {
+    const built = buildPhotoField(src, ctx, { ...params, gamma: g }, pitchMm);
+    measured.push(relativeLocalContrast(built.field, ctx.Wp, ctx.Hp, src.cover, PROBE_PPM));
+  }
+  const [g0, g1] = PUNCH_PROBES;
+  const [c0, c1] = measured;
+  const slope = c1 - c0;
+  // A flat response means contrast does not respond to Punch at all (a blank
+  // or single-tone image). Nothing to solve; leave the default in place.
+  if (!isFinite(slope) || Math.abs(slope) < 1e-6) return params.gamma;
+  const solved = g0 + ((AUTO_PUNCH_TARGET - c0) / slope) * (g1 - g0);
+  if (!isFinite(solved)) return params.gamma;
+  return Math.min(AUTO_PUNCH_MAX, Math.max(AUTO_PUNCH_MIN, Math.round(solved * 100) / 100));
+}
 
 export interface PhotoSource {
   /** luminance 0..1 at field resolution */
@@ -459,6 +607,33 @@ export function buildPhotoField(
   const span = Math.max(1e-4, wp - bp);
   for (let i = 0; i < n; i++) {
     f[i] = Math.min(1, Math.max(0, (f[i] - bp) / span));
+  }
+
+  // --- brightness and contrast: the two plain controls.
+  //
+  // Placed after levels and before posterize on purpose. Levels normalise the
+  // image's own range first, so these two act on a predictable 0..1 signal
+  // rather than fighting whatever the histogram happened to be; and running
+  // before posterize means the quantisation steps land on the adjusted tone,
+  // so raising contrast redistributes the steps instead of leaving them where
+  // the unadjusted image put them.
+  //
+  // Contrast first, then brightness: contrast pivots about mid-grey, so
+  // applying it after a gain would pivot about the wrong point and a
+  // brightness change would silently alter the contrast response. ---
+  if (params.contrast !== 0) {
+    const k = 1 + params.contrast;
+    for (let i = 0; i < n; i++) {
+      const v = (f[i] - 0.5) * k + 0.5;
+      f[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+    }
+  }
+  if (params.brightness !== 0) {
+    const k = 1 + params.brightness;
+    for (let i = 0; i < n; i++) {
+      const v = f[i] * k;
+      f[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+    }
   }
 
   // --- posterize: the "dumb it down" step. Hard tone steps read far better

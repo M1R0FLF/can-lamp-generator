@@ -15,6 +15,7 @@ import {
   PhotoPlacement,
   PhotoSource,
   PhotoFit,
+  solveAutoPunch,
   SeamMode,
   DEFAULT_PHOTO_PARAMS,
   DEFAULT_PLACEMENT,
@@ -220,6 +221,10 @@ const presetSelect = el<HTMLSelectElement>('preset');
 // overriding them. Without it, choosing Classic for a photo and then loading a
 // different crop would silently snap back to Detail.
 let generatorTouched = false;
+
+// Set once the user moves the Punch slider, so auto-Punch stops overriding a
+// choice they made with the render in front of them.
+let punchTouched = false;
 
 function buildGeneratorPicker() {
   const seg = el('generatorSeg');
@@ -801,6 +806,8 @@ function syncInputs() {
   set('photoOffsetY', String(pl.offsetY));
   set('photoPosterize', String(pp.posterize));
   set('photoGamma', String(pp.gamma));
+  set('photoBrightness', String(pp.brightness));
+  set('photoContrast', String(pp.contrast));
   set('photoLocalContrast', String(pp.localContrast));
   set('photoLocalContrastRadius', String(pp.localContrastRadiusMm));
   set('photoVignette', String(pp.vignette));
@@ -814,6 +821,9 @@ function syncInputs() {
   setText('photoOffsetYVal', `${pl.offsetY >= 0 ? '+' : ''}${Math.round(pl.offsetY * 100)}%`);
   setText('photoPosterizeVal', pp.posterize >= 2 ? `${Math.round(pp.posterize)} steps` : 'off');
   setText('photoGammaVal', pp.gamma.toFixed(2));
+  const signed = (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`;
+  setText('photoBrightnessVal', pp.brightness === 0 ? '0' : signed(pp.brightness));
+  setText('photoContrastVal', pp.contrast === 0 ? '0' : signed(pp.contrast));
   setText('photoLocalContrastVal', pp.localContrast.toFixed(2));
   setText('photoLocalContrastRadiusVal', `${pp.localContrastRadiusMm.toFixed(0)} mm`);
   setText('photoVignetteVal', pp.vignette.toFixed(2));
@@ -1094,6 +1104,17 @@ async function loadPhotoFile(file: File | undefined | null) {
     // Only moved when the user has not picked a pattern for themselves, so an
     // explicit choice survives loading a second image.
     if (!generatorTouched) state.generatorId = 'detail';
+    // Punch (gamma) trades face brightness against face contrast, and the right
+    // value is a property of the photograph rather than a constant — measured,
+    // two portraits wanted values nearly a factor of two apart. Solve it from
+    // the image instead of shipping one compromise. Deferred to the user the
+    // moment they touch the slider.
+    if (!punchTouched) {
+      state.photoParams.gamma = solveAutoPunch(
+        bmp, Math.PI * state.diameterMm, state.heightMm,
+        state.photoPlacement, state.photoParams, effectiveStipple().pitchMm
+      );
+    }
     // Loading an image IS choosing the photo source. Without this, dropping a
     // file while the Preset tab is active leaves the preview showing the
     // preset — the upload appears to have silently done nothing.
@@ -1156,8 +1177,15 @@ photoPlace('photoCoverage', 'coverage');
 photoPlace('photoOffsetX', 'offsetX');
 photoPlace('photoOffsetY', 'offsetY');
 
+photoTone('photoBrightness', 'brightness');
+photoTone('photoContrast', 'contrast');
 photoTone('photoPosterize', 'posterize');
 photoTone('photoGamma', 'gamma');
+// Touching Punch hands control back to the user for the rest of the session:
+// auto-Punch is a starting point, not a policy.
+el('photoGamma').addEventListener('input', () => {
+  punchTouched = true;
+});
 photoTone('photoLocalContrast', 'localContrast');
 photoTone('photoLocalContrastRadius', 'localContrastRadiusMm');
 photoTone('photoVignette', 'vignette');
@@ -1208,6 +1236,16 @@ el('photoReset').addEventListener('click', () => {
   // Look only — deliberately keeps placement, so resetting the tone controls
   // doesn't also throw away the framing the user just spent time on.
   state.photoParams = { ...DEFAULT_PHOTO_PARAMS };
+  // "Reset" means back to the default FOR THIS IMAGE, and auto-Punch is part of
+  // that default — handing back the generic 0.7 would reset to something the
+  // image was never going to want.
+  punchTouched = false;
+  if (state.photoImage) {
+    state.photoParams.gamma = solveAutoPunch(
+      state.photoImage, Math.PI * state.diameterMm, state.heightMm,
+      state.photoPlacement, state.photoParams, effectiveStipple().pitchMm
+    );
+  }
   syncInputs();
   draftThenFull();
 });

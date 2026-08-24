@@ -161,6 +161,40 @@ default was badly wrong for the common case. `tools/measure/photos.mjs` exists t
 that repeating: point it at real images and it flags face-vs-background open area, the
 rule 8 band and the rule 2 floor per pattern.
 
+### 4c. Punch is per-image, and the target is the only judgement in it
+
+Rule 4b sets the tone curve's *shape*; the exponent itself cannot be a constant. Punch
+(`PhotoParams.gamma`) trades face brightness against face contrast, and how much each
+image needs depends on how much contrast the subject already carries. Measured on two
+ordinary portraits, the values wanted were **0.7 and ~1.3** — nearly a factor of two —
+because one face had glasses and dark hair supplying its own contrast and the other was
+an evenly-lit studio shot whose features sat close to the skin tone. One constant served
+the first and produced "too bright, you can't see face details anymore" on the second.
+
+`solveAutoPunch()` closes the loop instead of guessing: probe two gammas, measure what
+the real tone pipeline produces, interpolate to a target. Relative contrast is near
+enough linear in gamma over the useful range that two probes suffice.
+
+Three things that are easy to get wrong here:
+
+- **Normalise contrast by the mean.** Raw RMS scales with brightness, so it scores any
+  darkening as a contrast *loss* even when features became more distinct. Un-normalised,
+  the measurement ranked higher gamma as worse — the exact opposite of what looking at
+  the renders showed.
+- **The target is resolution-coupled.** The solve runs at 2 px/mm for speed, where the
+  same approved setting measures 0.2064 against 0.1959 at the render's 8. Shipping the
+  8 px/mm number drove an image that wanted 0.70 onto the 0.60 clamp. `PROBE_PPM` and
+  `AUTO_PUNCH_TARGET` are one calibration, not two knobs.
+- **Measure the whole frame, and know which way that biases.** Nothing in production
+  knows where the subject is, and this project cannot have a face detector. A large flat
+  background reads low, so the solver overshoots on such images — landing 1.31 where a
+  face-only match said ~1.1. No whole-image target can reproduce a face-only match on
+  both images; that is the trade, and the direction at least favours contrast on exactly
+  the images that lacked it.
+
+The target is anchored on the single setting a human approved. If results drift, change
+that number and nothing else.
+
 ### 5. Density carries tone, not size
 
 Hole diameter alone spans maybe 4× in area — not enough. Real blacks (no holes at all)
@@ -400,6 +434,9 @@ Do not build the UI first.
 - **Live readout**: hole count + measured min web, red when under target
 - **Preview**: unlit (dots on metal) / lit (backlit glow) toggle, and a cylinder mock-up
 - **Export**: SVG at exact mm dimensions, `viewBox = "0 0 W H"`
+- **Photo tone**: plain Brightness and Contrast sliders (neutral at 0) alongside Punch,
+  Simplify and Local contrast. Brightness is a gain, not an offset, so black stays black
+  per rule 5.
 - **Personalize**: an optional short text label (name/date), composited on top of preset
   or custom alike — position as a fraction of circumference, vertical anchor + offset,
   letter height. See rule 9.
