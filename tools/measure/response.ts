@@ -12,11 +12,15 @@
 //   hash        0.000 0.059 0.148 0.258 0.386 0.530 0.689 0.864 1.000
 //   blue        0.000 0.059 0.148 0.258 0.386 0.530 0.691 0.865 1.000
 //   diffusion   0.000 0.058 0.148 0.258 0.386 0.530 0.690 0.865 1.000
-//   organic     0.000 0.058 0.146 0.254 0.381 0.527 0.689 0.866 1.000
+//   organic     0.000 0.058 0.146 0.254 0.381 0.527 0.689 0.866 1.000  (*)
 //   Draft       0.000 0.056 0.144 0.252 0.379 0.524 0.685 0.862 1.000
 //   Ultra       0.000 0.054 0.140 0.248 0.375 0.520 0.682 0.859 1.000
 //
 // Two things fall out of that table:
+//
+// (*) the off-grid pattern that measured this row was later dropped on its look
+// (CLAUDE.md rule 10); the row is kept because it is the strongest evidence for
+// point 1 — invariance holds even across a completely different point layout.
 //
 // 1. The SHAPE is invariant — within 3% across every grid, dither and quality
 //    tuple. So the worry that motivated the linearisation (that adding grid

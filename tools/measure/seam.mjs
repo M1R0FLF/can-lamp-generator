@@ -1,9 +1,9 @@
 // CLAUDE.md's hard requirement: the pattern must wrap seamlessly at x=0/W.
 //
-// Two new things could break it. The organic grid is a Poisson-disk set that
-// has to be periodic in x by construction, not by luck. And the blue-noise
-// mask is a 64-wide tile laid over a column count that is not a multiple of
-// 64, so its threshold field is discontinuous at the seam.
+// The new thing that could break it is the blue-noise mask: it is a 64-wide
+// tile laid over a column count that is not a multiple of 64, so its threshold
+// field is discontinuous at the seam. (Error diffusion is a second candidate —
+// its in-row error has to wrap onto a cell that is already decided.)
 //
 // Checked two ways on a CONSTANT field, where any density variation is an
 // artefact rather than the design: hole density in a narrow band straddling
@@ -14,10 +14,10 @@ export default async function ({ run }) {
     const L = window.LAMP;
     const W = Math.PI * 65, H = 142, PPM = 8;
     const base = { ...L.DEFAULT_STIPPLE, ...L.PHOTO_STIPPLE, pitchMm: 1.45, dMin: 0.28, dMax: 0.52, jitter: 0.15 };
-    const gens = [['classic','hex','hash'],['smooth','hex','blue'],['detail','hex','diffusion'],['organic','organic','blue']];
+    const gens = [['classic','hash'],['smooth','blue'],['detail','diffusion']];
     const res = [];
-    for (const [name, grid, dither] of gens) {
-      const params = { ...base, grid, dither };
+    for (const [name, dither] of gens) {
+      const params = { ...base, dither };
       const r = L.stipple(new Float32Array([0.5]), W, H, 1, 1, PPM, params);
       const BAND = 8; // mm each side of the seam
       let seam = 0, interior = 0;
@@ -34,7 +34,6 @@ export default async function ({ run }) {
         seamDensity: sd, interiorDensity: id,
         ratio: sd / id,
         minWeb: L.computeMinWeb(r.holes, W, Math.max(r.pitch * 1.2, 0.5)),
-        nominal: grid === 'organic' ? params.pitchMm * params.organicPacking - params.dMax : null,
         holes: r.holes.length,
       });
     }
@@ -44,7 +43,6 @@ export default async function ({ run }) {
   console.log('generator'.padEnd(10), 'seam/mm2'.padStart(9), 'interior'.padStart(9), 'ratio'.padStart(7), 'minWeb'.padStart(8));
   for (const r of out) {
     console.log(r.name.padEnd(10), r.seamDensity.toFixed(4).padStart(9), r.interiorDensity.toFixed(4).padStart(9),
-      r.ratio.toFixed(3).padStart(7), r.minWeb.toFixed(4).padStart(8),
-      r.nominal != null ? ` (nominal ${r.nominal.toFixed(4)})` : '');
+      r.ratio.toFixed(3).padStart(7), r.minWeb.toFixed(4).padStart(8));
   }
 }

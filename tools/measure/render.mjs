@@ -134,10 +134,9 @@ export default async function ({ run, argv }) {
     };
 
     const GENS = [
-      ['classic', { grid: 'hex', dither: 'hash' }],
-      ['smooth', { grid: 'hex', dither: 'blue' }],
-      ['detail', { grid: 'hex', dither: 'diffusion' }],
-      ['organic', { grid: 'organic', dither: 'blue' }],
+      ['classic', { dither: 'hash' }],
+      ['smooth', { dither: 'blue' }],
+      ['detail', { dither: 'diffusion' }],
     ];
     const q = window.LAMP.QUALITY_PRESETS[1];
     const base = { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter };
@@ -169,7 +168,7 @@ export default async function ({ run, argv }) {
       const ctx = L.photoFieldCtx(can);
       const place = L.placementFor(bmp.width, bmp.height, ctx.W, ctx.H);
       const src = L.sampleImage(bmp, ctx, place);
-      const r = L.generate(can, { kind: 'photo', source: src, params: { ...L.DEFAULT_PHOTO_PARAMS, localContrastEdgeAware: ea } }, { ...base, grid: 'hex', dither: 'diffusion' });
+      const r = L.generate(can, { kind: 'photo', source: src, params: { ...L.DEFAULT_PHOTO_PARAMS, localContrastEdgeAware: ea } }, { ...base, dither: 'diffusion' });
       emit(`lc-${tag}`, r.holes);
     }
     // --- a preset through each generator, to check nothing tuned breaks ---

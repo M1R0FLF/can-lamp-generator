@@ -216,6 +216,11 @@ const presetSelect = el<HTMLSelectElement>('preset');
 // ---------- dot pattern picker ----------
 // Built from GENERATORS rather than written into index.html, so the catalogue
 // and its measured justifications stay in one file.
+// Set once the user picks a pattern by hand, so loading a photo stops
+// overriding them. Without it, choosing Classic for a photo and then loading a
+// different crop would silently snap back to Detail.
+let generatorTouched = false;
+
 function buildGeneratorPicker() {
   const seg = el('generatorSeg');
   seg.innerHTML = '';
@@ -251,7 +256,6 @@ function effectiveStipple(): StippleParams {
     ...DEFAULT_STIPPLE,
     ...designPart,
     ...qualityPart,
-    grid: gen.grid,
     dither: gen.dither,
     ...state.overrides,
   };
@@ -717,15 +721,15 @@ function syncInputs() {
     const gen = getGenerator(state.generatorId);
     setText('generatorLabel', gen.name);
     // AM carries tone purely in hole size, so there is no density decision for
-    // a dither to make and three of the four patterns come out identical. That
-    // is correct, but it looks broken — and the default preset (Mango Salvaje)
-    // is the one AM design in the library, so it is the first thing a new user
+    // a dither to make and all three patterns come out identical. That is
+    // correct, but it looks broken — and the default preset (Mango Salvaje) is
+    // the one AM design in the library, so it is the first thing a new user
     // clicks. Say so rather than letting the buttons appear dead.
     setText(
       'generatorHint',
       s.mode === 'am'
         ? `${gen.hint} Note: this design sets tone by hole size alone (Advanced → Tone mode: AM), ` +
-          'so Classic, Smooth and Detail come out identical on it — only Organic changes the layout.'
+          'so the dot pattern makes no difference here. Switch Tone mode to Hybrid to use it.'
         : gen.hint
     );
     for (const b of el('generatorSeg').querySelectorAll('button')) {
@@ -1083,6 +1087,13 @@ async function loadPhotoFile(file: File | undefined | null) {
           : 'Upright, so it sits on the front with the back left dark.')
     );
     el('photoProps').style.display = 'block';
+    // A photograph wants the Detail pattern, so switch to it on load rather
+    // than leaving the user to discover it. Error diffusion holds ~13% more
+    // contrast at ~4mm features (measured; see generators.ts) and 4mm is the
+    // size of an eye on a can — Classic renders the same face visibly softer.
+    // Only moved when the user has not picked a pattern for themselves, so an
+    // explicit choice survives loading a second image.
+    if (!generatorTouched) state.generatorId = 'detail';
     // Loading an image IS choosing the photo source. Without this, dropping a
     // file while the Preset tab is active leaves the preview showing the
     // preset — the upload appears to have silently done nothing.
@@ -1206,6 +1217,7 @@ el('generatorSeg').addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest('button');
   if (!btn) return;
   state.generatorId = btn.dataset.gen!;
+  generatorTouched = true;
   syncInputs();
   draftThenFull();
 });

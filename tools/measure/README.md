@@ -39,4 +39,10 @@ compositional. `CLAUDE.md` rule 8 says outright that there is no numeric check f
 "too much fussy detail", and rule 4's halo corollary exists because the metrics pointed
 one way and the renders settled it the other. Two synthetic sources are built in: a
 test chart (ramp, flat patches, shrinking stripe packs, shaded sphere, 1-4mm detail) and
-a shaded head-and-shoulders form for "does a subject still read".
+a shaded head-and-shoulders form for "does a subject still read". The Organic pattern
+was dropped on exactly this evidence after the metrics had cleared it.
+
+One more warning from experience: sanity-check that a comparison is actually comparing
+different things. An edit to `seam.mjs` once left a stale element in its config tuples,
+so every row silently destructured an invalid `dither`, fell back to the default, and
+printed three identical rows as a clean result.

@@ -18,10 +18,9 @@ export default async function ({ run }) {
     const base = { ...L.PHOTO_STIPPLE, pitchMm: 1.45, dMin: 0.28, dMax: 0.52, jitter: 0.15 };
 
     const configs = [
-      { name: 'hex+hash', grid: 'hex', dither: 'hash' },
-      { name: 'hex+blue', grid: 'hex', dither: 'blue' },
-      { name: 'hex+diffusion', grid: 'hex', dither: 'diffusion' },
-      { name: 'organic+blue', grid: 'organic', dither: 'blue' },
+      { name: 'hash', dither: 'hash' },
+      { name: 'blue', dither: 'blue' },
+      { name: 'diffusion', dither: 'diffusion' },
     ];
     const freqs = [2, 4, 8, 16, 24, 32, 48];
 
@@ -48,7 +47,7 @@ export default async function ({ run }) {
     const NB = 141; // analysis bins ~= one pitch wide
     const res = [];
     for (const c of configs) {
-      const params = { ...base, grid: c.grid, dither: c.dither };
+      const params = { ...base, dither: c.dither };
       const resp = L.measureResponse(params, W, H, PPM);
       const R = respFn(resp);
       const mtf = [];

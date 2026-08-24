@@ -38,15 +38,14 @@ export default async function ({ run }) {
     };
 
     const configs = [
-      { name: 'hex+hash', grid: 'hex', dither: 'hash' },
-      { name: 'hex+blue', grid: 'hex', dither: 'blue' },
-      { name: 'hex+diffusion', grid: 'hex', dither: 'diffusion' },
-      { name: 'organic+blue', grid: 'organic', dither: 'blue' },
+      { name: 'hash', dither: 'hash' },
+      { name: 'blue', dither: 'blue' },
+      { name: 'diffusion', dither: 'diffusion' },
     ];
     const tones = [0.15, 0.3, 0.5, 0.7];
     const res = [];
     for (const c of configs) {
-      const params = { ...base, grid: c.grid, dither: c.dither };
+      const params = { ...base, dither: c.dither };
       const resp = L.measureResponse(params, W, H, PPM);
       const row = { name: c.name, maxOpen: resp.maxOpen, tones: [] };
       for (const t of tones) {

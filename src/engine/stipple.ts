@@ -14,30 +14,35 @@
 // measures the real thing.
 //
 // ---------------------------------------------------------------------------
-// Three orthogonal axes, not one list of "generators"
+// `dither` is a separate axis from `mode`
 // ---------------------------------------------------------------------------
-// `mode` above decides how tone becomes density-and-size. Two further axes
-// decide the mechanics, and keeping them separate from `mode` is what lets the
-// reference presets keep their exact tuning while the user picks a look:
+// `mode` above decides how tone becomes density-and-size. `dither` decides HOW
+// the density decision is made at each grid cell, and keeping the two separate
+// is what lets the reference presets keep their exact tuning while the user
+// picks a look:
 //
-//   `grid`   - WHERE the candidate points are. 'hex' is the lattice; 'organic'
-//              is a wrapped Poisson-disk set (see bluenoise.ts) that cannot
-//              moire against regular structure in a photo.
-//   `dither` - HOW the density decision is made at each candidate point.
-//              'hash' is the reference generators' screen hash, 'blue' is a
-//              void-and-cluster mask, 'diffusion' is serpentine error
-//              diffusion, which is the only one of the three that reproduces
-//              the requested density *exactly* rather than statistically.
+//   'hash'      - the reference generators' screen hash (interleaved gradient
+//                 noise). The default, and the pre-existing code path.
+//   'blue'      - a void-and-cluster mask (bluenoise.ts). Same tone, but
+//                 without the hash's tendency to lay dots into chains.
+//   'diffusion' - serpentine error diffusion. The only one of the three that
+//                 reproduces the requested density *exactly* rather than
+//                 statistically, which is where its detail advantage comes
+//                 from.
 //
-// Defaults are 'hex' + 'hash', which is the pre-existing code path, reproduced
-// hole-for-hole (see tools/measure/baseline.mjs — every preset's checksum is
-// unchanged). New axes must never silently restyle a tuned preset.
+// The default is 'hash', reproduced hole-for-hole (see
+// tools/measure/baseline.mjs — every preset's checksum is unchanged). A new
+// axis must never silently restyle a tuned preset.
+//
+// An off-grid `grid` axis was also built here — a wrapped Poisson-disk set, for
+// a hand-stippled look that cannot moire against regular structure in a photo.
+// It worked and was dropped on the look; CLAUDE.md rule 10 records what it
+// measured and what was worth keeping from it.
 import { mulberry32 } from './rng';
-import { blueNoiseMask, maskAt, poissonDisk } from './bluenoise';
+import { blueNoiseMask, maskAt } from './bluenoise';
 
 export type StippleMode = 'fm' | 'am' | 'hybrid';
 export type DitherKind = 'hash' | 'blue' | 'diffusion';
-export type GridKind = 'hex' | 'organic';
 
 export interface Hole {
   x: number;
@@ -59,35 +64,8 @@ export interface StippleParams {
   /** FM: the one hole size used everywhere */
   fixedDiameterMm: number;
   seed: number;
-  /** candidate point layout. 'hex' is the reference lattice. */
-  grid: GridKind;
   /** density decision rule. 'hash' is the reference screen hash. */
   dither: DitherKind;
-  /**
-   * ORGANIC only: minimum centre-to-centre distance as a fraction of `pitchMm`.
-   *
-   * Below 1 on purpose, and the value is MEASURED rather than derived. A
-   * Poisson-disk set is much less dense than a hex lattice at the same minimum
-   * distance, so leaving this at 1.0 would make every organic render dimmer
-   * than the same design on hex — the generator picker would be an exposure
-   * control rather than a style control, which is exactly what tonemap.ts
-   * exists to prevent.
-   *
-   * The textbook figure for a saturated Poisson-disk set is ~69% of hexagonal
-   * density, which would put this at 1/sqrt(0.69) =~ 0.83. Measured on this
-   * implementation (Bridson, k=20) it is not: 0.83 delivers 11,957 points
-   * against hex's 15,933, i.e. 75%. Bridson does not saturate. Calibrating
-   * against the real thing (tools/measure/run.mjs with the packing sweep)
-   * lands on 0.72, which gives 15,943 points — a ratio of 1.001.
-   *
-   * The result is comfortably inside rule 2, and in fact BEATS the hex grid
-   * on it. minDist = 1.45 x 0.72 = 1.044, so the web floor is 1.044 - 0.52 =
-   * 0.524mm; measured min web comes out at exactly that, because Poisson-disk
-   * enforces the minimum by construction and organic needs no jitter to look
-   * irregular. Jittered hex at the same tuple measures 0.424mm — its nominal
-   * 0.93mm eroded by jitter, exactly as rule 2 warns.
-   */
-  organicPacking: number;
 }
 
 export const DEFAULT_STIPPLE: StippleParams = {
@@ -101,9 +79,7 @@ export const DEFAULT_STIPPLE: StippleParams = {
   knee: 0.42,
   fixedDiameterMm: 0.35,
   seed: 3,
-  grid: 'hex',
   dither: 'hash',
-  organicPacking: 0.72,
 };
 
 export interface StippleResult {
@@ -173,20 +149,12 @@ export function stipple(
   params: Partial<StippleParams> = {}
 ): StippleResult {
   const p0 = { ...DEFAULT_STIPPLE, ...params };
-  const { pitchMm, dMin, dMax, jitter, thresh, mode, gamma, knee, fixedDiameterMm } = p0;
+  const { pitchMm, dMin, dMax, jitter, thresh, mode, gamma, knee, fixedDiameterMm, dither } = p0;
 
   const cols = Math.max(1, Math.round(W / pitchMm));
   const p = W / cols;
   const rowsp = (p * Math.sqrt(3)) / 2;
   const rows = Math.max(1, Math.round(H / rowsp));
-
-  // Error diffusion needs a scan order, which an unstructured point set does
-  // not have. Rather than invent one (a raster sort over Poisson points
-  // produces exactly the directional worms ED_THRESHOLD_MOD exists to
-  // suppress), organic falls back to the blue-noise mask, which is a genuine
-  // blue-noise decision either way.
-  const dither: DitherKind =
-    p0.grid === 'organic' && p0.dither === 'diffusion' ? 'blue' : p0.dither;
 
   // ---- pass 1: candidate points and the tone sampled at each ----
   //
@@ -202,50 +170,19 @@ export function stipple(
   // straight into the exported SVG. Rounding them to single precision moves
   // every hole by a few nanometres, which is invisible on the can but makes
   // the sampler no longer bit-identical to the reference path — and
-  // bit-identical is the property that proves the new axes did not restyle a
-  // tuned preset. Cheap: three arrays x 16k points x 8 bytes.
-  let cx: Float64Array;
-  let cy: Float64Array;
-  let ccol: Int32Array;
-  let crow: Int32Array;
-  let count: number;
-  let reportedPitch = p;
-
-  if (p0.grid === 'organic') {
-    const minDist = pitchMm * p0.organicPacking;
-    const pts = poissonDisk(W, H, minDist, p0.seed);
-    count = pts.length;
-    cx = new Float64Array(count);
-    cy = new Float64Array(count);
-    ccol = new Int32Array(count);
-    crow = new Int32Array(count);
-    for (let k = 0; k < count; k++) {
-      cx[k] = pts[k].x;
-      cy[k] = pts[k].y;
-      // Integer coordinates only for indexing the tiled blue-noise mask, so
-      // the threshold field stays spatially blue rather than per-point random.
-      ccol[k] = Math.floor(pts[k].x / minDist);
-      crow[k] = Math.floor(pts[k].y / minDist);
-    }
-    reportedPitch = minDist;
-  } else {
-    count = rows * cols;
-    cx = new Float64Array(count);
-    cy = new Float64Array(count);
-    ccol = new Int32Array(count);
-    crow = new Int32Array(count);
-    for (let j = 0; j < rows; j++) {
-      const yRow = (j + 0.5) * rowsp;
-      for (let i = 0; i < cols; i++) {
-        const k = j * cols + i;
-        let x = (i + (j % 2 ? 0.5 : 0.0)) * p + p * 0.5;
-        x += (rng() - 0.5) * 2 * jitter * p;
-        const y = yRow + (rng() - 0.5) * 2 * jitter * rowsp;
-        cx[k] = x;
-        cy[k] = y;
-        ccol[k] = i;
-        crow[k] = j;
-      }
+  // bit-identical is the property that proves the new axis did not restyle a
+  // tuned preset.
+  const count = rows * cols;
+  const cx = new Float64Array(count);
+  const cy = new Float64Array(count);
+  for (let j = 0; j < rows; j++) {
+    const yRow = (j + 0.5) * rowsp;
+    for (let i = 0; i < cols; i++) {
+      const k = j * cols + i;
+      let x = (i + (j % 2 ? 0.5 : 0.0)) * p + p * 0.5;
+      x += (rng() - 0.5) * 2 * jitter * p;
+      cx[k] = x;
+      cy[k] = yRow + (rng() - 0.5) * 2 * jitter * rowsp;
     }
   }
 
@@ -293,12 +230,14 @@ export function stipple(
   if (mode === 'am') {
     for (let k = 0; k < count; k++) on[k] = live[k];
   } else if (dither === 'diffusion') {
-    diffuse(on, demand, live, rows, cols, ccol, crow);
+    diffuse(on, demand, live, rows, cols);
   } else {
     const mask = dither === 'blue' ? blueNoiseMask() : null;
     for (let k = 0; k < count; k++) {
       if (!live[k]) continue;
-      const t = mask ? maskAt(mask, ccol[k], crow[k]) : ditherHash(ccol[k], crow[k]);
+      const i = k % cols;
+      const j = (k / cols) | 0;
+      const t = mask ? maskAt(mask, i, j) : ditherHash(i, j);
       if (t < demand[k]) on[k] = 1;
     }
   }
@@ -317,7 +256,7 @@ export function stipple(
     holes.push({ x: cxw[k], y: H - cy[k], r: d / 2 });
   }
 
-  return { holes, pitch: reportedPitch, rows, cols };
+  return { holes, pitch: p, rows, cols };
 }
 
 /**
@@ -336,9 +275,7 @@ function diffuse(
   demand: Float32Array,
   live: Uint8Array,
   rows: number,
-  cols: number,
-  ccol: Int32Array,
-  crow: Int32Array
+  cols: number
 ): void {
   const err = new Float32Array(on.length);
   const mask = blueNoiseMask();
@@ -358,7 +295,7 @@ function diffuse(
       if (!live[k]) continue;
 
       const v = demand[k] + err[k];
-      const thr = 0.5 + ED_THRESHOLD_MOD * (maskAt(mask, ccol[k], crow[k]) - 0.5);
+      const thr = 0.5 + ED_THRESHOLD_MOD * (maskAt(mask, i, j) - 0.5);
       const lit = v >= thr;
       if (lit) on[k] = 1;
       const e = v - (lit ? 1 : 0);

@@ -224,54 +224,74 @@ cropping — and it deliberately runs on the built `field`, not as a separate re
 layer, so it gets the ordinary treatment: rule 6 band-limiting, rule 4's moat, and
 rule 3's bold weight (thin fonts dissolve exactly like thin outlines do).
 
-### 10. The sampler has three axes, and only one of them is a look
+### 10. `dither` is an axis, not a look — and open area must stay flat across it
 
-`stipple.ts` carries `mode` (fm/am/hybrid, how tone becomes density-and-size), `grid`
-(where the candidate points are) and `dither` (how the density decision is made). They
-are deliberately independent, because that is the only way to add looks without
-restyling twenty tuned presets: the defaults `hex` + `hash` are the original code path
-and reproduce every preset **hole-for-hole**. `tools/measure/baseline.mjs` prints a
-per-preset checksum; if it moves, something that should have been additive wasn't.
+`stipple.ts` carries `mode` (fm/am/hybrid, how tone becomes density-and-size) and
+`dither` (how the density decision is made at each cell). They are deliberately
+independent, because that is the only way to add looks without restyling twenty tuned
+presets: the default `hash` is the original code path and reproduces every preset
+**hole-for-hole**. `tools/measure/baseline.mjs` prints a per-preset position checksum;
+if it moves, something that should have been additive wasn't. (The checksums are also
+why hole coordinates must stay `Float64` — staging them through a `Float32Array` shifts
+every hole by nanometres and quietly destroys the property.)
 
-Four combinations are exposed, via `generators.ts` — not six dropdowns, and not the
-raw axes. What each is actually for, measured rather than asserted:
+Three combinations ship, via `generators.ts`:
 
 | | MTF@48c | chaining | open area |
 |---|---|---|---|
-| Classic (hex+hash) | 0.796 | 0.378 | 11.67% |
-| Smooth (hex+blue) | 0.785 | 0.013 | 11.67% |
-| Detail (hex+diffusion) | 0.897 | 0.153 | 11.67% |
-| Organic (poisson+blue) | 0.814 | 0.006 | 11.68% |
+| Classic (hash) | 0.796 | 0.378 | 11.67% |
+| Smooth (blue) | 0.785 | 0.013 | 11.67% |
+| Detail (diffusion) | 0.897 | 0.153 | 11.67% |
 
 `MTF@48c` is how much contrast survives at ~4mm features — the size of an eye in a
 portrait. `chaining` is the concentration of nearest-neighbour directions at mid-tone;
 high means the dots fall into lines, which reads as faint scratches across a smooth
-gradient. Three things to take from it:
+gradient. Four things to take from it:
 
 - **Judge a dither by direction, not by variance.** Density variance over 5×5-cell
-  windows says all four are equally good (0.36–0.75× random). It is the wrong metric:
+  windows says all three are equally good (0.36–0.60× random). It is the wrong metric:
   the reference hash is a closed-form lattice function, so near simple rational
   densities it degenerates into visible chains, and only the directional statistic
-  sees that.
-- **Open area must match across the set, or the picker is a brightness control.**
-  `organicPacking` (0.72) exists solely to make that column flat, and its value is
-  measured, not derived — the textbook 69%-of-hex packing figure predicts 0.83, which
-  measured 25% short because Bridson does not saturate.
-- **AM has no density decision**, so Classic/Smooth/Detail are *identical* on an AM
-  preset and only Organic changes anything. Mango Salvaje is the library's one AM
-  design and also the default, so the UI says this out loud rather than letting four
-  buttons look dead.
+  sees it. Smooth exists entirely because of that second measurement.
+- **Open area must stay flat across the set**, or the picker doubles as a brightness
+  control and every switch needs the tone sliders re-tuned. It is free for these three
+  because they share the hex lattice. It is *not* free in general — see below.
+- **Error diffusion's threshold modulation is a measured trade** (`ED_THRESHOLD_MOD`),
+  not a taste: 0.12 gives chaining 0.294 / MTF 0.959, and 0.60 gives 0.095 / 0.816, by
+  which point it has degraded back to mask-dither territory. 0.40 is the knee.
+- **AM has no density decision**, so all three patterns are *identical* on an AM preset.
+  Mango Salvaje is the library's one AM design and also the default, so the UI says so
+  out loud rather than letting three buttons look dead.
 
-Organic is also the structurally safest option, not the riskiest: Poisson-disk enforces
-its minimum distance by construction and needs no jitter, so it measures a 0.524mm web
-where jittered hex measures 0.424mm from a nominal 0.93mm (rule 2's erosion, exactly).
+Three things were built, measured, and deliberately left out. Do not re-attempt them
+without reading these first.
 
-**Do not re-attempt tone linearisation.** `photo.ts` proposes it and it was built and
-then deleted; `tools/measure/response.ts` has the numbers. The normalised response
-curve is invariant within 3% across every grid, dither and quality tuple, and the
-existing hard-coded `gamma: 1.6` already lands the end-to-end exponent within 0.15%
-of its 2.2 target. It would have replaced a verified-correct tuned constant with a
-computed one for no visible change.
+- **Off-grid "Organic" (wrapped Poisson-disk, Bridson).** Worked, wrapped seamlessly,
+  and was structurally the *safest* option — Poisson-disk enforces its minimum distance
+  by construction and needs no jitter, so it measured a 0.524mm web where jittered hex
+  measures 0.424mm from a nominal 0.93mm (rule 2's erosion, exactly). Dropped on the
+  look: local density variation measured 0.220 at mid-tone against hex's 0.076, which
+  reads as clumping rather than as hand-stippling. If it is ever revisited, the fix is
+  to rank the actual point set (sample-elimination ordering) instead of tiling a 64×64
+  mask over irregular points — and the thing worth keeping from the first attempt is
+  that its packing constant had to be **measured**: the textbook 69%-of-hex figure
+  predicts a 0.83 spacing factor, which came out 25% short because Bridson does not
+  saturate. 0.72 matched hex density to 1.001. Any future off-grid pattern needs the
+  same calibration or it silently changes exposure.
+- **Tone linearisation**, which `photo.ts`'s own comment proposes.
+  `tools/measure/response.ts` has the numbers: the normalised response curve is
+  invariant within 3% across every dither and quality tuple, and the hard-coded
+  `gamma: 1.6` already lands the end-to-end exponent within 0.15% of its 2.2 target.
+  It would have replaced a verified-correct tuned constant with a computed one for no
+  visible change.
+- **Edge-aware local contrast as the default** — see rule 4's corollary.
+
+Weighted Voronoi stippling (StippleGen) and weighted Linde–Buzo–Gray (Deussen 2017)
+were both considered and rejected before implementation: they give the organic look and
+neither gives a minimum-spacing guarantee, which rule 2 makes non-negotiable. The
+lesson generalises — the algorithms worth porting from the halftoning literature are
+the ones that act *on* the existing grid (error diffusion, void-and-cluster), because
+those inherit rule 2 for free.
 
 ---
 
@@ -346,8 +366,9 @@ Do not build the UI first.
   or custom alike — position as a fraction of circumference, vertical anchor + offset,
   letter height. See rule 9.
 - **Back-of-can features**: LED wire hole toggle (rule 9), diameter/margin in Advanced.
-- **Dot pattern**: the four named generators from `generators.ts` (rule 10), each with a
-  one-line hint. Sits between Quality and Hole size, since it is a peer of both.
+- **Dot pattern**: the three named generators from `generators.ts` (rule 10), each with
+  a one-line hint. Sits between Quality and Hole size, since it is a peer of both.
+  Loading a photo switches to Detail unless the user has already picked one by hand.
 
 (This list predates the preset library, the custom shape editor, and mobile support,
 none of which it describes — treat it as a historical starting spec, not current UI
