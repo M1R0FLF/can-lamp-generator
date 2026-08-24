@@ -23,6 +23,7 @@ import {
   placementFor,
 } from './engine/photo';
 import { PRESETS, getPreset } from './engine/presets';
+import { GENERATORS, DEFAULT_GENERATOR_ID, getGenerator } from './engine/generators';
 import { Hole, StippleMode, StippleParams, DEFAULT_STIPPLE } from './engine/stipple';
 import { renderGlow } from './engine/glow';
 import { createCan3D, CAN_STYLES, Can3D } from './render3d';
@@ -80,6 +81,8 @@ interface State {
   presetId: string;
   qualityIndex: number;
   holeMode: HoleMode;
+  /** id from GENERATORS: which grid+dither pair the sampler runs */
+  generatorId: string;
   fixedDiameter: number;
   /** stipple overrides the user has explicitly touched */
   overrides: Partial<StippleParams>;
@@ -118,6 +121,7 @@ const state: State = {
   presetId: PRESETS[0].id,
   qualityIndex: DEFAULT_QUALITY_INDEX,
   holeMode: 'varying',
+  generatorId: DEFAULT_GENERATOR_ID,
   fixedDiameter: 0.35,
   overrides: {},
   minWebTarget: DEFAULT_MIN_WEB_TARGET,
@@ -209,6 +213,21 @@ const presetSelect = el<HTMLSelectElement>('preset');
   presetSelect.value = state.presetId;
 }
 
+// ---------- dot pattern picker ----------
+// Built from GENERATORS rather than written into index.html, so the catalogue
+// and its measured justifications stay in one file.
+function buildGeneratorPicker() {
+  const seg = el('generatorSeg');
+  seg.innerHTML = '';
+  for (const g of GENERATORS) {
+    const b = document.createElement('button');
+    b.dataset.gen = g.id;
+    b.textContent = g.name;
+    b.classList.toggle('active', g.id === state.generatorId);
+    seg.appendChild(b);
+  }
+}
+
 // ---------- resolve the stipple params in play ----------
 function effectiveStipple(): StippleParams {
   // Gated on an image actually being loaded, not just on the tab being open:
@@ -223,10 +242,17 @@ function effectiveStipple(): StippleParams {
   const qualityPart = q
     ? { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter }
     : {};
+  // The generator sits between the design's own tuning and the user's explicit
+  // Advanced overrides: it is a deliberate choice, so it beats a preset's
+  // default, but it only carries `grid`/`dither` and must not shadow anything
+  // the user typed by hand.
+  const gen = getGenerator(state.generatorId);
   const base: StippleParams = {
     ...DEFAULT_STIPPLE,
     ...designPart,
     ...qualityPart,
+    grid: gen.grid,
+    dither: gen.dither,
     ...state.overrides,
   };
   if (state.holeMode === 'fixed') {
@@ -687,6 +713,25 @@ function syncInputs() {
   set('knee', s.knee.toFixed(2));
   set('stippleGamma', s.gamma.toFixed(2));
   set('toneMode', s.mode);
+  {
+    const gen = getGenerator(state.generatorId);
+    setText('generatorLabel', gen.name);
+    // AM carries tone purely in hole size, so there is no density decision for
+    // a dither to make and three of the four patterns come out identical. That
+    // is correct, but it looks broken — and the default preset (Mango Salvaje)
+    // is the one AM design in the library, so it is the first thing a new user
+    // clicks. Say so rather than letting the buttons appear dead.
+    setText(
+      'generatorHint',
+      s.mode === 'am'
+        ? `${gen.hint} Note: this design sets tone by hole size alone (Advanced → Tone mode: AM), ` +
+          'so Classic, Smooth and Detail come out identical on it — only Organic changes the layout.'
+        : gen.hint
+    );
+    for (const b of el('generatorSeg').querySelectorAll('button')) {
+      b.classList.toggle('active', (b as HTMLElement).dataset.gen === state.generatorId);
+    }
+  }
   set('minWebTarget', state.minWebTarget.toFixed(2));
   set('laserSpeed', String(state.laserSpeed));
   set('laserPasses', String(state.laserPasses));
@@ -777,6 +822,9 @@ function syncInputs() {
   }
   for (const b of document.querySelectorAll<HTMLElement>('#photoSeamSeg button')) {
     b.classList.toggle('active', b.dataset.seam === pl.seam);
+  }
+  for (const b of document.querySelectorAll<HTMLElement>('#photoEdgeAwareSeg button')) {
+    b.classList.toggle('active', (b.dataset.edgeaware === '1') === pp.localContrastEdgeAware);
   }
   for (const b of document.querySelectorAll<HTMLElement>('#photoAutoLevelsSeg button')) {
     b.classList.toggle('active', (b.dataset.auto === '1') === pp.autoLevels);
@@ -1131,6 +1179,14 @@ el('photoAutoLevelsSeg').addEventListener('click', (e) => {
   draftThenFull();
 });
 
+el('photoEdgeAwareSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.photoParams.localContrastEdgeAware = btn.dataset.edgeaware === '1';
+  syncInputs();
+  draftThenFull();
+});
+
 el('photoInvert').addEventListener('click', () => {
   state.photoParams.invert = !state.photoParams.invert;
   syncInputs();
@@ -1141,6 +1197,15 @@ el('photoReset').addEventListener('click', () => {
   // Look only — deliberately keeps placement, so resetting the tone controls
   // doesn't also throw away the framing the user just spent time on.
   state.photoParams = { ...DEFAULT_PHOTO_PARAMS };
+  syncInputs();
+  draftThenFull();
+});
+
+// dot pattern
+el('generatorSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.generatorId = btn.dataset.gen!;
   syncInputs();
   draftThenFull();
 });
@@ -1698,6 +1763,7 @@ el<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
 
 // ---------- init ----------
 injectAnalytics(); // no-ops locally; only sends events once served from Vercel
+buildGeneratorPicker();
 applyViewMode();
 applyAnnotationProps();
 syncInputs();

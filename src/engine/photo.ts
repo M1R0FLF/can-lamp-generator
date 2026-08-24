@@ -10,7 +10,7 @@
 //
 // A photo also does not wrap. `seam` handles that explicitly rather than
 // leaving a visible discontinuity at x=0.
-import { FieldCtx, boxBlur, clamp01 } from './fieldkit';
+import { FieldCtx, boxBlur, clamp01, guidedSelf } from './fieldkit';
 
 /**
  * sRGB transfer-function tables, so luminance is computed from LIGHT rather
@@ -84,6 +84,38 @@ export interface PhotoParams {
    * which is the actual goal, and leaves 16mm features intact.
    */
   localContrastRadiusMm: number;
+  /**
+   * Use an edge-aware reference for the local-contrast pass (guidedSelf() in
+   * fieldkit.ts) instead of a plain blur.
+   *
+   * OFF by default, and that default is the measured answer rather than
+   * caution. The plain blur unquestionably haloes — against a 40mm bright
+   * subject on textured dark ground it drags the ground 7.3% darker where it
+   * meets the subject, and against a hard-edged one it clips 30mm of
+   * background to pure black. The guided reference cuts that to 1.5%.
+   *
+   * But the halo is doing CLAUDE.md rule 4's job. Rule 4 calls a dark moat
+   * around a bright shape "the single biggest legibility lever", and an
+   * unsharp mask at a 30mm radius produces one for free. Rendered side by side
+   * the haloed portrait is brighter and its eyes, nose shadow and mouth all
+   * read more clearly; the halo-free one is flatter and reads worse. Nor can
+   * it be dialled back in: a self-guided filter only amplifies variance INSIDE
+   * a region, and smooth skin has almost none, so pushing `localContrast` from
+   * 0.45 to 0.95 moved open area from 1.11% to 1.13% and changed nothing
+   * visible.
+   *
+   * So this is not an upgrade, it is an escape hatch — worth having for images
+   * where the halo is destructive rather than helpful (a high-key photo, or
+   * one with several bright regions whose 30mm halos would eat all the
+   * background between them), and worth leaving off everywhere else.
+   */
+  localContrastEdgeAware: boolean;
+  /**
+   * Edge threshold for that filter, in units of tone variance: a window whose
+   * tone spread exceeds ~sqrt(eps) is treated as structure to preserve rather
+   * than texture to average away.
+   */
+  localContrastEdgeEps: number;
   /** quantise to N tone steps. 0 or 1 = off */
   posterize: number;
   /** add Sobel gradient magnitude so structure survives the low sample count */
@@ -210,6 +242,8 @@ export const DEFAULT_PHOTO_PARAMS: PhotoParams = {
   gamma: 1.6,
   localContrast: 0.45,
   localContrastRadiusMm: 30,
+  localContrastEdgeAware: false,
+  localContrastEdgeEps: 0.01,
   posterize: 6,
   // kept low by default: edge boost also amplifies background grain, which
   // shows up as stray specks around the subject
@@ -391,9 +425,11 @@ export function buildPhotoField(
   // sharpening; fine-scale sharpening actively hurts at this pitch (rule 6). ---
   if (params.localContrast > 0) {
     const r = Math.max(2, Math.round(params.localContrastRadiusMm * ctx.PPM));
-    const blurred = boxBlur(f, Wp, Hp, r, r);
+    const reference = params.localContrastEdgeAware
+      ? guidedSelf(f, Wp, Hp, r, params.localContrastEdgeEps)
+      : boxBlur(f, Wp, Hp, r, r);
     for (let i = 0; i < n; i++) {
-      f[i] = f[i] + params.localContrast * (f[i] - blurred[i]);
+      f[i] = f[i] + params.localContrast * (f[i] - reference[i]);
     }
   }
 

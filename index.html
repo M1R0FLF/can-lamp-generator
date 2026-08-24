@@ -203,6 +203,16 @@
                 <input type="range" id="photoWhitePoint" min="0.5" max="1" step="0.01" />
               </div>
             </div>
+            <div class="field">
+              <label>Contrast halo</label>
+              <div class="segmented" id="photoEdgeAwareSeg">
+                <button data-edgeaware="0" class="active">Keep (moat)</button>
+                <button data-edgeaware="1">Suppress</button>
+              </div>
+              <p class="hint">Local contrast darkens the background around a bright
+                subject. That halo usually helps it stand out. Suppress it if bright
+                areas are eating the detail around them.</p>
+            </div>
             <div class="row2">
               <div class="field">
                 <label>Contrast radius <span class="val" id="photoLocalContrastRadiusVal"></span></label>
@@ -294,6 +304,12 @@
         <summary>Quality <span class="tag" id="qualityLabel"></span></summary>
         <input type="range" id="quality" min="0" max="3" step="1" />
         <div class="ticks"><span>Draft</span><span>Standard</span><span>Fine</span><span>Ultra</span></div>
+      </details>
+
+      <details class="ctrl" open>
+        <summary>Dot pattern <span class="tag" id="generatorLabel"></span></summary>
+        <div class="segmented" id="generatorSeg"></div>
+        <p class="hint" id="generatorHint"></p>
       </details>
 
       <details class="ctrl" open>

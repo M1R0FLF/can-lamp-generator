@@ -109,6 +109,20 @@ Stroke the path in black at `lineWidth = 2 × moat` *before* filling it white. ~
 Without the moat, a bright shape sitting in textured background has no figure/ground
 separation. This is the single biggest legibility lever.
 
+**Corollary — a photo's local-contrast halo is a moat, so don't "fix" it.** Unsharp
+masking against a blurred reference haloes by construction: measured against a 40mm
+bright subject on textured dark ground, `photo.ts`'s 30mm local contrast drags the
+background 7.3% darker where it meets the subject (and against a *hard*-edged subject
+it clips 30mm of background to pure black). Replacing the blur with an edge-aware
+guided filter cuts that to 1.5% — and makes the result **worse**, because the halo was
+doing this rule's job for free. Rendered side by side the haloed portrait is brighter
+and its eyes, nose shadow and mouth all read more clearly. Nor is it recoverable by
+turning the amount up: a self-guided filter only amplifies variance *inside* a region
+and smooth skin has almost none, so 0.45 → 0.95 moved open area 1.11% → 1.13% and
+changed nothing visible. The edge-aware path ships as an opt-in escape hatch
+(`PhotoParams.localContrastEdgeAware`, default off) for high-key images where several
+bright regions' halos would eat all the background between them.
+
 ### 5. Density carries tone, not size
 
 Hole diameter alone spans maybe 4× in area — not enough. Real blacks (no holes at all)
@@ -210,6 +224,82 @@ cropping — and it deliberately runs on the built `field`, not as a separate re
 layer, so it gets the ordinary treatment: rule 6 band-limiting, rule 4's moat, and
 rule 3's bold weight (thin fonts dissolve exactly like thin outlines do).
 
+### 10. The sampler has three axes, and only one of them is a look
+
+`stipple.ts` carries `mode` (fm/am/hybrid, how tone becomes density-and-size), `grid`
+(where the candidate points are) and `dither` (how the density decision is made). They
+are deliberately independent, because that is the only way to add looks without
+restyling twenty tuned presets: the defaults `hex` + `hash` are the original code path
+and reproduce every preset **hole-for-hole**. `tools/measure/baseline.mjs` prints a
+per-preset checksum; if it moves, something that should have been additive wasn't.
+
+Four combinations are exposed, via `generators.ts` — not six dropdowns, and not the
+raw axes. What each is actually for, measured rather than asserted:
+
+| | MTF@48c | chaining | open area |
+|---|---|---|---|
+| Classic (hex+hash) | 0.796 | 0.378 | 11.67% |
+| Smooth (hex+blue) | 0.785 | 0.013 | 11.67% |
+| Detail (hex+diffusion) | 0.897 | 0.153 | 11.67% |
+| Organic (poisson+blue) | 0.814 | 0.006 | 11.68% |
+
+`MTF@48c` is how much contrast survives at ~4mm features — the size of an eye in a
+portrait. `chaining` is the concentration of nearest-neighbour directions at mid-tone;
+high means the dots fall into lines, which reads as faint scratches across a smooth
+gradient. Three things to take from it:
+
+- **Judge a dither by direction, not by variance.** Density variance over 5×5-cell
+  windows says all four are equally good (0.36–0.75× random). It is the wrong metric:
+  the reference hash is a closed-form lattice function, so near simple rational
+  densities it degenerates into visible chains, and only the directional statistic
+  sees that.
+- **Open area must match across the set, or the picker is a brightness control.**
+  `organicPacking` (0.72) exists solely to make that column flat, and its value is
+  measured, not derived — the textbook 69%-of-hex packing figure predicts 0.83, which
+  measured 25% short because Bridson does not saturate.
+- **AM has no density decision**, so Classic/Smooth/Detail are *identical* on an AM
+  preset and only Organic changes anything. Mango Salvaje is the library's one AM
+  design and also the default, so the UI says this out loud rather than letting four
+  buttons look dead.
+
+Organic is also the structurally safest option, not the riskiest: Poisson-disk enforces
+its minimum distance by construction and needs no jitter, so it measures a 0.524mm web
+where jittered hex measures 0.424mm from a nominal 0.93mm (rule 2's erosion, exactly).
+
+**Do not re-attempt tone linearisation.** `photo.ts` proposes it and it was built and
+then deleted; `tools/measure/response.ts` has the numbers. The normalised response
+curve is invariant within 3% across every grid, dither and quality tuple, and the
+existing hard-coded `gamma: 1.6` already lands the end-to-end exponent within 0.15%
+of its 2.2 target. It would have replaced a verified-correct tuned constant with a
+computed one for no visible change.
+
+---
+
+## Measurement harness
+
+`tools/measure/` runs the real engine inside the preinstalled Chromium (the engine is
+not portable to bare Node — `FieldCtx` and `photo.ts` both rasterize through a real
+Canvas2D, which is the whole point of the port plan below).
+
+```
+node tools/measure/run.mjs tools/measure/baseline.mjs   # per-preset checksums - run before AND after any sampler change
+node tools/measure/run.mjs tools/measure/mtf.mjs        # modulation transfer + reconstruction error
+node tools/measure/run.mjs tools/measure/dither.mjs     # tone fidelity + uniformity
+node tools/measure/run.mjs tools/measure/seam.mjs       # rule 1: density across x=0/W, and closest pair
+node tools/measure/run.mjs tools/measure/render.mjs OUT # lit/unlit PNGs, for the judgments no metric makes
+```
+
+`run.mjs <script.mjs>` bundles `browser-entry.ts`, injects it, and hands the script a
+`run(fn)` that evaluates `fn` in the page with `window.LAMP` holding the engine. A
+constant field can be passed as a **1×1** array — `stipple()` clamps its sample index,
+so every candidate point reads the same value, which is what makes response curves
+cheap to measure against the real sampler instead of a model of it.
+
+Use `render.mjs` for anything compositional. Rule 8 is explicit that there is no
+numeric check for "too much fussy detail", and the same goes for whether a halo helps
+or hurts (rule 4) — both were settled by looking at the PNGs, after the metrics had
+pointed the wrong way.
+
 ---
 
 ## Port plan
@@ -256,10 +346,13 @@ Do not build the UI first.
   or custom alike — position as a fraction of circumference, vertical anchor + offset,
   letter height. See rule 9.
 - **Back-of-can features**: LED wire hole toggle (rule 9), diameter/margin in Advanced.
+- **Dot pattern**: the four named generators from `generators.ts` (rule 10), each with a
+  one-line hint. Sits between Quality and Hole size, since it is a peer of both.
 
 (This list predates the preset library, the custom shape editor, and mobile support,
 none of which it describes — treat it as a historical starting spec, not current UI
-inventory. The two bullets above are the exception, added when those features shipped.)
+inventory. The three bullets above are the exception, added when those features
+shipped.)
 
 ## Constraints
 
