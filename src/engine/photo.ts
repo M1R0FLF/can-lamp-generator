@@ -202,44 +202,61 @@ export const PHOTO_STIPPLE = {
 };
 
 /**
- * Lithophane-informed correction, quickly borrowed from a different craft
- * that solved a related problem. A lithophane maps luminance to material
- * THICKNESS, and thin/thick both transmit light non-linearly (Beer-Lambert);
- * our case is simpler because a hole is fully open or fully closed, so open-
- * area fraction already equals transmitted light fraction directly (linear).
- * But the photo's pixel values are NOT linear — a digital photo is
- * gamma-encoded (~2.2) so that equal steps LOOK equally spaced to a human
- * eye. Feeding that encoded value straight in as "fraction open" over-
- * brightens midtones: a nominal 50%-gray pixel wants to be perceived at
- * ~50% brightness, which requires physical transmission of roughly
- * 0.5^2.2 =~ 0.22, not 0.5.
+ * Tone defaults for photographs.
  *
- * So the target end-to-end exponent from perceptual tone to open area is
- * ~2.2 — but `gamma` is NOT the only exponent in that chain. The sampler
- * contributes one too, and it is not 1. In HYBRID mode two effects multiply:
- * density rises as f/knee AND hole area rises as g^stippleGamma. Measured on
- * constant fields with PHOTO_STIPPLE (knee 0.95, thresh 0.05, gamma 0.5), open
- * area goes 0.10 -> 0.044, 0.50 -> 0.386, 0.90 -> 0.901: an effective exponent
- * of about 1.37. (The presets' low knee of 0.42 measures ~0.50 instead, which
- * is why this constant cannot simply be shared with them.)
+ * ---------------------------------------------------------------------------
+ * `gamma`: open area tracks PERCEPTUAL tone, not display luminance
+ * ---------------------------------------------------------------------------
+ * A hole is fully open or fully closed, so open-area fraction equals
+ * transmitted-light fraction directly. The obvious move from there is to treat
+ * the can as a display: a digital photo is gamma-encoded (~2.2) so equal steps
+ * LOOK equally spaced, therefore aim for an end-to-end exponent of 2.2 and a
+ * nominal 50% grey transmits 0.5^2.2 =~ 0.22.
  *
- * 1.9 x 1.37 =~ 2.6, well past the 2.2 target — midtones came out roughly a
- * quarter too dark. 2.2 / 1.37 =~ 1.6, so that is the default. Still
- * user-tunable, since posterize and local contrast interact with it.
+ * That was the reasoning behind the old default of 1.6, and the arithmetic was
+ * right — the sampler contributes its own exponent, measured at 1.373 in
+ * HYBRID mode with PHOTO_STIPPLE, and 1.6 x 1.373 = 2.197 lands within 0.15%
+ * of 2.2 (tools/measure/response.ts).
  *
- * The principled fix, once there's appetite for it, is to stop guessing at
- * the sampler's exponent and measure it: run stipple() over ~33 constant
- * fields, build the open-area response curve, and invert it as a lookup —
- * a printer linearisation curve. That decouples tone from sampler tuning
- * permanently, so changing `knee` would alter the grain without moving the
- * tone curve at all.
+ * The TARGET was wrong. A monitor can put out a real white; this can cannot.
+ * Maximum open area at the Standard tuple is 11.67%, so the whole output range
+ * is one dim eighth of the wall, and squaring it throws most of that away.
+ * Measured on two real portraits shot against bright backgrounds, the face
+ * came out at 1.29% open against a 3.15% background — the SUBJECT rendered
+ * 2.4x darker than its surroundings, which is rule 3b exactly inverted, and
+ * reported (accurately) as "both faces are too dark".
+ *
+ * So the target is open area proportional to perceptual tone, i.e. an
+ * end-to-end exponent of ~1.0, which needs 1/1.373 = 0.73. At 0.7 the same
+ * face measures 3.52% against a 3.41% background — a subject slightly
+ * brighter than its surroundings instead of a hole in them.
+ *
+ * The synthetic portrait used to develop this pipeline hid it: it was built
+ * dark-background and light-subject, the one polarity where a compressive
+ * curve does no visible harm.
+ *
+ * ---------------------------------------------------------------------------
+ * `vignette`: 0.7, because it is subject dominance, not decoration
+ * ---------------------------------------------------------------------------
+ * The falloff darkens toward the frame, and on a portrait the frame is exactly
+ * where the background lives. It is therefore the one control that suppresses
+ * background without touching the subject, which is rule 3b's "give the hero
+ * genuinely dark breathing room". Measured in the right direction: dropping it
+ * from 0.55 to 0.35 raised background open area from 3.64% to 4.51% with the
+ * face unchanged. Raised to 0.7 for the same reason, in reverse.
+ *
+ * `invert` stays a manual button. Auto-detecting bright-background portraits
+ * and flipping them was tried, worked exactly as designed, and looked worse:
+ * inverting a face makes hair bright and skin dark, i.e. a photographic
+ * negative, which reads as eerie rather than as a portrait. The real problem
+ * those images had was the gamma above, not their polarity.
  */
 export const DEFAULT_PHOTO_PARAMS: PhotoParams = {
   invert: false,
   autoLevels: true,
   blackPoint: 0.04,
   whitePoint: 0.96,
-  gamma: 1.6,
+  gamma: 0.7,
   localContrast: 0.45,
   localContrastRadiusMm: 30,
   localContrastEdgeAware: false,
@@ -248,85 +265,9 @@ export const DEFAULT_PHOTO_PARAMS: PhotoParams = {
   // kept low by default: edge boost also amplifies background grain, which
   // shows up as stray specks around the subject
   edgeBoost: 0.1,
-  vignette: 0.55,
+  vignette: 0.7,
   ambient: 0.0,
 };
-
-/**
- * Border-minus-centre luminance above which a photo is assumed to have a
- * SUBJECT DARKER THAN ITS BACKGROUND, and wants inverting.
- *
- * Why this exists: a perforated can is a light source, so hole density maps to
- * brightness, and a photograph shot against a bright background therefore
- * renders the background bright and the subject as a dark hole in it. That is
- * backwards for a lamp — rules 3b and 4 both want the subject to dominate and
- * to sit on dark ground — and it is the single largest quality lever on real
- * photographs, bigger than the choice of dot pattern.
- *
- * It went unnoticed for a while because the synthetic portrait used to develop
- * the tone pipeline was built with a dark background, which is exactly the case
- * that does NOT need inverting. Two real portraits, both shot against bright
- * ground, both measured border-minus-centre at +0.197; the dark-background
- * synthetic measured -0.670. So the classes separate by nearly 0.9 and the
- * threshold only has to be somewhere sane in between.
- *
- * 0.08 sits ~2.5x below the real cases and far above zero, so an evenly-lit or
- * ambiguous image is left alone rather than flipped on a coin toss.
- */
-const INVERT_BORDER_MARGIN = 0.08;
-
-/**
- * Guess whether an image should be inverted, by comparing a border ring
- * against the middle. Cheap: the decision is made on a 64x64 downscale, since
- * it is a question about two large regional averages and nothing finer.
- *
- * Deliberately measured on the SOURCE image rather than on the placed field:
- * "is this subject darker than its background" is a property of the
- * photograph, not of how it happens to be cropped onto the can, and computing
- * it here means the answer does not shift while the user drags zoom or pan.
- */
-export function suggestInvert(img: HTMLImageElement | ImageBitmap): boolean {
-  const N = 64;
-  const c = document.createElement('canvas');
-  c.width = N;
-  c.height = N;
-  const g = c.getContext('2d', { willReadFrequently: true });
-  if (!g) return false;
-  g.imageSmoothingEnabled = true;
-  g.imageSmoothingQuality = 'high';
-  g.drawImage(img, 0, 0, N, N);
-  const d = g.getImageData(0, 0, N, N).data;
-
-  let ring = 0;
-  let ringN = 0;
-  let mid = 0;
-  let midN = 0;
-  for (let y = 0; y < N; y++) {
-    const ty = y / (N - 1);
-    for (let x = 0; x < N; x++) {
-      const tx = x / (N - 1);
-      const i = (y * N + x) * 4;
-      // same luminance definition as sampleImage(): Rec.709 on LINEAR light,
-      // re-encoded, so this decision and the tone pipeline agree about what
-      // "brighter" means (see the SRGB_* tables above).
-      const Y =
-        0.2126 * SRGB_DECODE[d[i]] +
-        0.7152 * SRGB_DECODE[d[i + 1]] +
-        0.0722 * SRGB_DECODE[d[i + 2]];
-      const v = SRGB_ENCODE[Math.min(4095, Math.max(0, Math.round(Y * 4095)))];
-      const inset = Math.min(tx, 1 - tx, ty, 1 - ty);
-      if (inset < 0.22) {
-        ring += v;
-        ringN++;
-      } else if (inset > 0.3) {
-        mid += v;
-        midN++;
-      }
-    }
-  }
-  if (ringN === 0 || midN === 0) return false;
-  return ring / ringN - mid / midN >= INVERT_BORDER_MARGIN;
-}
 
 export interface PhotoSource {
   /** luminance 0..1 at field resolution */

@@ -123,6 +123,44 @@ changed nothing visible. The edge-aware path ships as an opt-in escape hatch
 (`PhotoParams.localContrastEdgeAware`, default off) for high-key images where several
 bright regions' halos would eat all the background between them.
 
+### 4b. A can is not a monitor — don't aim for a display gamma
+
+The obvious tone target for a photo is an end-to-end exponent of 2.2, so open area
+tracks the display-referred luminance of the original. `photo.ts` aimed at exactly that
+and hit it: the sampler contributes a measured 1.373, so its `gamma` of 1.6 landed the
+chain at 2.197, within 0.15% of target.
+
+The arithmetic was right and **the target was wrong**. A monitor can output a real
+white; a perforated can tops out at 11.67% open area at the Standard tuple, so the
+entire output range is one dim eighth of the wall — and squaring it throws most of that
+away. Measured on two real portraits shot against bright backgrounds, the face came out
+at **1.29% open against a 3.15% background**: the subject rendered 2.4× darker than its
+surroundings, which is rule 3b exactly inverted, and was reported as "both faces are
+too dark".
+
+Aim instead for open area proportional to **perceptual** tone — exponent ~1.0, so
+`gamma` = 1/1.373 ≈ 0.7. The same face then measures 3.52% against 3.41%: slightly
+brighter than its surroundings rather than a hole in them.
+
+Two corollaries:
+
+- **`vignette` is subject dominance, not decoration.** It darkens toward the frame, and
+  on a portrait the frame is exactly where the background lives — so it is the one
+  control that suppresses background without touching the subject. Dropping it from
+  0.55 to 0.35 raised background open area 3.64% → 4.51% with the face unchanged; it is
+  now 0.7 for the same reason in reverse.
+- **Don't auto-invert a bright-background portrait.** It was built, it worked exactly as
+  designed, and it looked worse: inverting a face makes hair bright and skin dark, i.e.
+  a photographic negative, which reads as eerie rather than as a portrait. Those images'
+  real problem was the gamma above, not their polarity. `invert` stays a manual button.
+
+**The test that would have caught all of this is one real photograph.** The synthetic
+portrait in `render.mjs` was built dark-background/light-subject — the single polarity
+where a compressive curve does no visible harm — so it cleared every metric while the
+default was badly wrong for the common case. `tools/measure/photos.mjs` exists to stop
+that repeating: point it at real images and it flags face-vs-background open area, the
+rule 8 band and the rule 2 floor per pattern.
+
 ### 5. Density carries tone, not size
 
 Hole diameter alone spans maybe 4× in area — not enough. Real blacks (no holes at all)

@@ -15,7 +15,6 @@ import {
   PhotoPlacement,
   PhotoSource,
   PhotoFit,
-  suggestInvert,
   SeamMode,
   DEFAULT_PHOTO_PARAMS,
   DEFAULT_PLACEMENT,
@@ -221,10 +220,6 @@ const presetSelect = el<HTMLSelectElement>('preset');
 // overriding them. Without it, choosing Classic for a photo and then loading a
 // different crop would silently snap back to Detail.
 let generatorTouched = false;
-
-// Same idea for the photo's Invert button: auto-detection should defer to a
-// person who has already looked at the result and decided.
-let invertTouched = false;
 
 function buildGeneratorPicker() {
   const seg = el('generatorSeg');
@@ -1099,11 +1094,6 @@ async function loadPhotoFile(file: File | undefined | null) {
     // Only moved when the user has not picked a pattern for themselves, so an
     // explicit choice survives loading a second image.
     if (!generatorTouched) state.generatorId = 'detail';
-    // A can is a light source, so a subject shot against a BRIGHT background
-    // comes out as a dark hole in a bright field — backwards for a lamp, and
-    // the biggest single quality lever on real photos. Detect it and flip.
-    // Same "unless the user has decided" gate as the pattern above.
-    if (!invertTouched) state.photoParams.invert = suggestInvert(bmp);
     // Loading an image IS choosing the photo source. Without this, dropping a
     // file while the Preset tab is active leaves the preview showing the
     // preset — the upload appears to have silently done nothing.
@@ -1210,7 +1200,6 @@ el('photoEdgeAwareSeg').addEventListener('click', (e) => {
 
 el('photoInvert').addEventListener('click', () => {
   state.photoParams.invert = !state.photoParams.invert;
-  invertTouched = true;
   syncInputs();
   draftThenFull();
 });
@@ -1219,13 +1208,6 @@ el('photoReset').addEventListener('click', () => {
   // Look only — deliberately keeps placement, so resetting the tone controls
   // doesn't also throw away the framing the user just spent time on.
   state.photoParams = { ...DEFAULT_PHOTO_PARAMS };
-  // "Reset" means back to the default FOR THIS IMAGE, which includes the
-  // auto-detected invert. Without re-running it, resetting a portrait shot
-  // against a bright background would hand back the broken version — subject
-  // as a dark hole in a bright field — which is not what anyone means by
-  // reset. Clearing the flag also puts detection back in charge.
-  invertTouched = false;
-  if (state.photoImage) state.photoParams.invert = suggestInvert(state.photoImage);
   syncInputs();
   draftThenFull();
 });
