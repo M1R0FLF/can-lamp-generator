@@ -59,6 +59,13 @@ import { PhotoPlacement, PhotoSource } from './photo';
 export const DEFAULT_FACE_HEIGHT_FRAC = 0.7;
 
 /**
+ * Head height as a fraction of the wall, for the adaptive framing in
+ * faceFind.ts. Larger than DEFAULT_FACE_HEIGHT_FRAC because a head box includes
+ * hair and jaw, which the face box does not.
+ */
+export const DEFAULT_HEAD_HEIGHT_FRAC = 0.82;
+
+/**
  * Placement that makes a face fill the wall.
  *
  * `coverage` 0.55 keeps the whole face inside the visible front hemisphere —
@@ -152,7 +159,16 @@ export interface PortraitParams {
    * perceived brightness. Values above 1 trade brightness for contrast.
    */
   gamma: number;
-  /** Darken toward the frame. On a portrait the frame is where background lives. */
+  /**
+   * Darken toward the frame. On a portrait the frame is where background lives.
+   *
+   * Lower than photo.ts's 0.7 because adaptive framing (faceFind.ts) already
+   * crops most of the background away, so the vignette no longer has to do that
+   * job alone. Measured: it does NOT eat into the face — at 0.55 vs 0.0 the
+   * face is unchanged and only the surround differs — but 0.55 pushed a
+   * tightly-cropped portrait under rule 8's open-area floor (1.79%), and 0.35
+   * clears it (1.88%) with no visible difference to the subject.
+   */
   vignette: number;
   /**
    * Normalise levels on the FACE region rather than the whole frame.
@@ -173,7 +189,7 @@ export const DEFAULT_PORTRAIT_PARAMS: PortraitParams = {
   contrast: 0,
   levels: 0,
   gamma: 1,
-  vignette: 0.55,
+  vignette: 0.35,
   faceMeteredLevels: true,
 };
 
