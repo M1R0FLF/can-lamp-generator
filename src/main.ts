@@ -252,7 +252,7 @@ const presetSelect = el<HTMLSelectElement>('preset');
 // and its measured justifications stay in one file.
 // Set once the user picks a pattern by hand, so loading a photo stops
 // overriding them. Without it, choosing Classic for a photo and then loading a
-// different crop would silently snap back to Detail.
+// different crop would silently snap back to the auto-picked pattern.
 let generatorTouched = false;
 
 // Set once the user moves the Punch slider, so auto-Punch stops overriding a
@@ -1264,13 +1264,32 @@ async function loadPhotoFile(file: File | undefined | null) {
     }
     setText('faceStatus', faceMsg);
 
-    // A photograph wants the Detail pattern, so switch to it on load rather
-    // than leaving the user to discover it. Error diffusion holds ~13% more
-    // contrast at ~4mm features (measured; see generators.ts) and 4mm is the
-    // size of an eye on a can — Classic renders the same face visibly softer.
-    // Only moved when the user has not picked a pattern for themselves, so an
-    // explicit choice survives loading a second image.
-    if (!generatorTouched) state.generatorId = 'detail';
+    // A photograph never wants Classic, so switch off it on load rather than
+    // leaving the user to discover that. Which pattern it wants depends on
+    // whether there is a face, so this has to run after the detection above.
+    //
+    // Classic is out either way: Smooth beats it on BOTH measured axes for a
+    // photo (MTF 0.785 vs 0.796 is a wash; chaining 0.013 vs 0.378 is not),
+    // and Classic is only the global default because it is what every preset
+    // was tuned against — a reason that has nothing to do with photographs.
+    //
+    // Between the other two it is a real trade, and the case for Detail is
+    // specifically a face: error diffusion holds ~13% more contrast at ~4mm
+    // features (measured; see generators.ts) and 4mm is the size of an eye on
+    // a can, so Smooth renders the same face visibly softer. Without a face
+    // there is no feature at that scale worth protecting — rule 3's legible
+    // floor is ~16mm and closed — while Detail's cost is unchanged: its
+    // residual chaining lays dots into faint scratches across large near-flat
+    // areas, which is most of what a landscape or a product shot is made of.
+    // So the face pipeline gets Detail and everything else gets Smooth.
+    //
+    // This is reasoning from the two measured numbers, not a sweep over a
+    // corpus the way rule 4d's vignette was: if it is ever revisited, the way
+    // to settle it is tools/measure/render.mjs over real non-face photographs,
+    // because chaining is a look and no single metric ranks it against MTF.
+    if (!generatorTouched) {
+      state.generatorId = state.photoMode === 'portrait' ? 'detail' : 'smooth';
+    }
     // Punch (gamma) trades face brightness against face contrast, and the right
     // value is a property of the photograph rather than a constant — measured,
     // two portraits wanted values nearly a factor of two apart. Solve it from

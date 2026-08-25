@@ -292,6 +292,20 @@ another corner of the engine: **an axis that is secretly load-bearing for someth
 cannot be tuned.** The close-out (`SEAM_FADE_FRAC`) is now unconditional and independent
 of `vignette`, and applies only when the image really is a medallion.
 
+**It is not only tone constants — the dot-pattern auto-switch had the same bug.** Loading
+any photo snapped the picker to Detail, and the comment justifying it said outright *"4mm
+is the size of an eye on a can"*. That is a face's argument, and after the fork it was
+being applied to landscapes, products and animals. Error diffusion's price is unchanged
+without a face — its residual chaining (0.153 against Smooth's 0.013) lays dots into faint
+scratches across large near-flat areas, which is most of what a non-face photograph is —
+while what it buys sits below rule 3's ~16mm legible floor once the image is mapped onto a
+65mm wall. The switch now reads the face detector that already ran: face → Detail,
+otherwise → Smooth. Classic is wrong for a photograph either way, since Smooth beats it on
+both measured axes; it is the global default only because it is what the presets were
+tuned against. Unlike the vignette above this one is argued from the two numbers rather
+than swept over a corpus — `tools/measure/render.mjs` over real non-face photographs is
+what would settle it, because chaining is a look and no metric ranks it against MTF.
+
 ### 5. Density carries tone, not size
 
 Hole diameter alone spans maybe 4× in area — not enough. Real blacks (no holes at all)
@@ -540,7 +554,10 @@ Do not build the UI first.
 - **Back-of-can features**: LED wire hole toggle (rule 9), diameter/margin in Advanced.
 - **Dot pattern**: the three named generators from `generators.ts` (rule 10), each with
   a one-line hint. Sits between Quality and Hole size, since it is a peer of both.
-  Loading a photo switches to Detail unless the user has already picked one by hand.
+  Loading a photo switches off Classic unless the user has already picked one by
+  hand — to Detail when the face detector found a face, otherwise to Smooth. See
+  rule 4d: Detail's case is an eye-sized feature, so it does not transfer to a
+  photograph that has no face.
 
 (This list predates the preset library, the custom shape editor, and mobile support,
 none of which it describes — treat it as a historical starting spec, not current UI
