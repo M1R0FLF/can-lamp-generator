@@ -125,6 +125,8 @@ interface State {
   annotationSizeMm: number;
   ledHoleEnabled: boolean;
   ledHoleDiameterMm: number;
+  /** sever the base so a light goes in from below — see BottomCutSpec */
+  bottomCutEnabled: boolean;
   /** decoded upload; null until the user actually picks a file */
   photoImage: ImageBitmap | null;
   photoName: string;
@@ -176,6 +178,7 @@ const state: State = {
   // 0.1mm aluminium plus any grommet — tune in Advanced if that's too tight
   // or too loose once you've test-cut one.
   ledHoleDiameterMm: 3.4,
+  bottomCutEnabled: false,
   photoImage: null,
   photoName: '',
   photoPlacement: { ...DEFAULT_PLACEMENT },
@@ -382,6 +385,7 @@ function regenerate(ppm: number) {
       enabled: state.ledHoleEnabled,
       diameterMm: state.ledHoleDiameterMm,
     },
+    bottomCut: { enabled: state.bottomCutEnabled },
   };
   // With the photo tab open but no file chosen yet, fall through to the preset
   // rather than rendering an empty can — the pane's own empty state is what
@@ -502,7 +506,14 @@ function renderReadout() {
     : openAreaPct < DEFAULT_OPEN_AREA_MIN_PCT
       ? `Under ${DEFAULT_OPEN_AREA_MIN_PCT}% — reads as mostly black/empty (CLAUDE.md rule 8)`
       : `Over ${DEFAULT_OPEN_AREA_MAX_PCT}% — leaves no dark ground for contrast (CLAUDE.md rule 8)`;
-  setText('roCutTime', formatDuration(estimateCutSeconds(r.holes.length, state.laserSpeed, state.laserPasses)));
+  // The separation cut is continuous length, not holes — pi*D of it, charged
+  // per pass like everything else. Small, but it is real cutting time and the
+  // readout is what the user plans a session around.
+  const extraPathMm = r.bottomCut ? r.W : 0;
+  setText(
+    'roCutTime',
+    formatDuration(estimateCutSeconds(r.holes.length, state.laserSpeed, state.laserPasses, extraPathMm))
+  );
   setText('roGenTime', `${(r.buildMs + r.sampleMs).toFixed(0)} ms`);
 }
 
@@ -643,6 +654,34 @@ function drawLedNotch(
   ctx.restore();
 }
 
+/**
+ * The bottom separation cut, drawn as a line ON the design rather than as
+ * geometry in it — because that is what it is: a zero-width cut has no area
+ * to show, and what the user needs to see is *where the can comes apart*.
+ * So unlike drawLedNotch (which draws a real opening, and is therefore kept
+ * out of Lit where it would imply light the assembled lamp won't pass) this
+ * is an annotation in every preview mode, in the same red the SVG uses for
+ * the cut's own layer.
+ *
+ * `yFlatMm` is the physical can's bottom edge in this canvas's coordinates,
+ * exactly as drawLedNotch takes it — the cut is flush with that edge, so the
+ * stroke is inset by half its width to stay visible instead of being drawn
+ * half outside the canvas.
+ */
+function drawBottomCut(canvas: HTMLCanvasElement, yFlatMm: number, sp: number) {
+  const ctx = canvas.getContext('2d')!;
+  const lw = 2.5;
+  ctx.save();
+  ctx.strokeStyle = '#ff4d3d';
+  ctx.lineWidth = lw;
+  const y = Math.min(canvas.height - lw / 2, yFlatMm * sp);
+  ctx.beginPath();
+  ctx.moveTo(0, y);
+  ctx.lineTo(canvas.width, y);
+  ctx.stroke();
+  ctx.restore();
+}
+
 /** Dim the parts of the design the current crop window throws away, and
  * outline the part that survives, so the crop is visible rather than implied. */
 function overlayCrop(canvas: HTMLCanvasElement, r: GenerateResult, sp: number) {
@@ -719,10 +758,12 @@ function renderPreviews() {
     flatCanvas.getContext('2d')!.drawImage(flat, 0, 0);
     overlayCrop(flatCanvas, r, sp);
     // Left out of Lit on purpose — see drawLedNotch.
+    const yFlatMm = cropping ? r.designH - r.cropWindow!.fromMm : r.H;
     if (r.ledNotch && state.previewMode !== 'lit') {
-      const yFlatMm = cropping ? r.designH - r.cropWindow!.fromMm : r.H;
       drawLedNotch(flatCanvas, r.ledNotch, yFlatMm, r.W, sp, tiles, state.previewMode === 'unlit');
     }
+    // Drawn in every mode, including Lit — see drawBottomCut.
+    if (r.bottomCut) drawBottomCut(flatCanvas, yFlatMm, sp);
 
     // keep the rail's track the same height as the preview it annotates
     el('cropRail').style.height = `${flat.height}px`;
@@ -772,6 +813,8 @@ function renderPreviews() {
       // would blow out the phone layout instead of fixing anything.
       widthPx: stacked ? undefined : Math.round(r.W * sp),
       ledNotch: r.ledNotch,
+      // Only the base is severed, so only the bottom cap opens up.
+      bottomOpen: !!r.bottomCut,
     });
     // Stacked, the rail annotates the CAN, not the flat pane whose height the
     // branch above would normally have set — so match the stage instead.
@@ -1162,6 +1205,20 @@ el('ledHoleSeg').addEventListener('click', (e) => {
 });
 
 numInput('ledHoleDiameter', (v) => (state.ledHoleDiameterMm = v), true);
+
+// ---------- cut the bottom off ----------
+// Its own control, not a third position on the LED segmented above: the two
+// are independent choices (a lamp wants both; a can you are only perforating
+// wants neither) and the notch is only meaningful as a gap in the rim the
+// separation cut leaves behind.
+el('bottomCutSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.bottomCutEnabled = (btn as HTMLElement).dataset.bottomcut === 'on';
+  for (const b of el('bottomCutSeg').querySelectorAll('button')) b.classList.toggle('active', b === btn);
+  el('bottomCutHint').style.display = state.bottomCutEnabled ? 'block' : 'none';
+  draftThenFull();
+});
 
 // source toggle
 //

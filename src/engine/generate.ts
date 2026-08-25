@@ -67,6 +67,42 @@ export interface LedNotch {
   r: number;
 }
 
+/**
+ * Sever the can's base so a light module can go in from below — a single
+ * continuous cut right around the circumference, at the very bottom of the
+ * straight wall. Like the LED notch this belongs to the physical can rather
+ * than to the design, and for the same reason: whether you are building a
+ * lamp out of this can is what decides it, not what is printed on it.
+ *
+ * WHERE: flush with y = H, the same boundary the LED notch's flat side sits
+ * on, and for the identical reason (rule 9) — `heightMm` is the STRAIGHT
+ * section only, so y = H is already the last line the galvo can hold focus
+ * on before the base flare curves away. Cutting there removes exactly the
+ * flare and the base dome, which is the whole of what has to go, and asks
+ * the laser for nothing it could not already reach. It also puts the cut
+ * directly beneath the wire notch, so the notch reads as an open U in the
+ * finished rim (a gap the cable lays into while the can stands flat) rather
+ * than as a hole somewhere up the wall. There is deliberately no offset
+ * control: a cut higher up would slice THROUGH the notch, and every mm above
+ * H is wall you paid for in cut time and then threw away.
+ *
+ * WHEN: last. See `bottomCutGroup` in svg.ts for how that survives the trip
+ * through an SVG, which has no cut-order semantics of its own.
+ */
+export interface BottomCutSpec {
+  enabled: boolean;
+}
+
+/**
+ * The separation cut: one straight line across the full canvas width at `y`,
+ * which is a full 360-degree cut once the sheet is wrapped (rule 1 — it spans
+ * the wrap, so it needs no seam handling; both ends meet at the same physical
+ * point by construction).
+ */
+export interface BottomCut {
+  y: number;
+}
+
 export interface CanSpec {
   diameterMm: number;
   heightMm: number;
@@ -74,6 +110,7 @@ export interface CanSpec {
   /** 0 keeps the bottom of the reference design, 1 keeps the top. Presets only. */
   panY?: number;
   ledHole?: LedHoleSpec;
+  bottomCut?: BottomCutSpec;
 }
 
 /**
@@ -135,6 +172,8 @@ export interface GenerateResult {
   cropWindow: CropWindow | null;
   /** null when the LED wire hole is off. Not in `holes` — see LedHoleSpec. */
   ledNotch: LedNotch | null;
+  /** null when the base is being left on. Not in `holes` either — see below. */
+  bottomCut: BottomCut | null;
 }
 
 /**
@@ -300,6 +339,14 @@ export function generate(
     ledNotch = { x, r: can.ledHole.diameterMm / 2 };
   }
 
+  // Out of `holes` for the same two reasons as the notch, both of which apply
+  // harder here: a 200mm line in the min-web set would read as one enormous
+  // "hole" overlapping every real one, and in the Lit render a severed base is
+  // not a lit dot — the light source goes IN through this opening, it doesn't
+  // shine out of a hairline at the rim. See BottomCutSpec for the geometry and
+  // svg.ts's bottomCutGroup for why it is emitted last.
+  const bottomCut: BottomCut | null = can.bottomCut?.enabled ? { y: H } : null;
+
   return {
     W,
     H,
@@ -319,6 +366,7 @@ export function generate(
     sampleMs: t2 - t1,
     cropWindow,
     ledNotch,
+    bottomCut,
   };
 }
 
@@ -341,5 +389,5 @@ export function photoFieldCtx(can: CanSpec): FieldCtx {
 }
 
 export function resultToSvg(r: GenerateResult, title: string): string {
-  return writeSvg(r.holes, r.W, r.H, title, r.ledNotch);
+  return writeSvg(r.holes, r.W, r.H, title, { ledNotch: r.ledNotch, bottomCut: r.bottomCut });
 }

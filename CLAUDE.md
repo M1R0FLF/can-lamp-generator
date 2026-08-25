@@ -407,6 +407,58 @@ cropping — and it deliberately runs on the built `field`, not as a separate re
 layer, so it gets the ordinary treatment: rule 6 band-limiting, rule 4's moat, and
 rule 3's bold weight (thin fonts dissolve exactly like thin outlines do).
 
+### 9b. An SVG has no cut order — so a separation cut has to earn its place last
+
+Cutting the can's base off (`CanSpec.bottomCut`, `GenerateResult.bottomCut`) is the
+second real through-cut, and it is the first one whose *ordering* matters: it severs the
+workpiece. Cut it before the perforations and the offcut lets go mid-job, with the
+rotary still turning.
+
+Nothing in the SVG format expresses that. The importing software invents an order, and
+the two things it invents it from are **document order** and **colour**:
+
+- **xTool Creative Space** defines layers by the colour of the vector lines and
+  processes "the vertical layer order, from the top layer down to the bottom" — the
+  list is built as the file is read, so last in the document is bottom of the list is
+  cut last. Its *Auto planning* mode ignores that and does engrave-then-cut,
+  interior-first, which happens to land the same way round for a full-width line; *By
+  layer* is the mode that actually honours it.
+- **LightBurn** processes layers in the order they appear in the Cuts list, with black
+  as C00 — so a non-black stroke sorts after the black holes there too. (Red for cuts,
+  black for engraving is that world's convention anyway.)
+
+So `svg.ts` emits it **last in document order, in its own colour** (`#ff0000` stroke,
+`fill="none"`, `id="bottom-cut"`), after `</g>` of `#holes`. Neither mechanism is a
+guarantee — both let the operator drag the order around, and LightBurn is known to
+reshuffle on re-import — so the file also carries a comment saying so, and the UI hint
+tells the operator to pick *By layer* and check. The separate colour is not decoration:
+it is what makes the reorder possible in the first place, and it lets one continuous
+through-cut take the passes it needs without dragging every stipple hole along.
+
+The rest follows rule 9 exactly:
+
+- **Flush with y = H**, directly under the LED notch, which then reads as an open U in
+  the finished rim rather than a hole up the wall. Same justification as the notch's
+  flat side: `heightMm` is the straight section only, so y=H is already the last line
+  the galvo holds focus on, and cutting there removes precisely the flare and the base
+  dome. There is deliberately **no offset control** — a cut any higher slices through
+  the notch, and every mm above H is wall you paid cut time for and then discarded.
+- **Not in `holes`**, for the notch's two reasons, both worse here: a 204mm line in the
+  min-web set reads as one enormous "hole" overlapping every real one, and in the Lit
+  render a severed base is not a lit dot — the light goes *in* through this opening, it
+  does not shine out of a hairline at the rim.
+- **Previewed as an annotation, not as geometry.** A zero-width cut has no area to
+  render; what has to be visible is *where the can comes apart*. So unlike the notch
+  (real opening, therefore kept out of Lit) it is drawn in **every** preview mode: a red
+  line at the foot of the flat view and a red ring around the foot of the 3D can. The
+  first attempt instead darkened the 3D bottom cap to read as an opening, and that
+  showed nothing at all — the cap is edge-on at the mockup's fixed tilt. The ring wraps,
+  so it reads from every angle.
+- **Cut time is charged as length, not as holes.** `estimateCutSeconds`'s per-hole
+  constant is dominated by rotary repositioning overhead, and an unbroken
+  circumferential cut has none — the axis just spins. Its `extraPathMm` term is
+  therefore plain length/speed, and the one place that model is honestly path-based.
+
 ### 10. `dither` is an axis, not a look — and open area must stay flat across it
 
 `stipple.ts` carries `mode` (fm/am/hybrid, how tone becomes density-and-size) and
@@ -552,6 +604,10 @@ Do not build the UI first.
   or custom alike — position as a fraction of circumference, vertical anchor + offset,
   letter height. See rule 9.
 - **Back-of-can features**: LED wire hole toggle (rule 9), diameter/margin in Advanced.
+- **Base**: a "cut bottom off" toggle — the separation cut that lets a light module go
+  in from below (rule 9b). No options: see the rule for why an offset knob would be
+  wrong. Its hint carries the cut-order instruction, because getting that wrong is what
+  ruins the job.
 - **Dot pattern**: the three named generators from `generators.ts` (rule 10), each with
   a one-line hint. Sits between Quality and Hole size, since it is a peer of both.
   Loading a photo switches off Classic unless the user has already picked one by

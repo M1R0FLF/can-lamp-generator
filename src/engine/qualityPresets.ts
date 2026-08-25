@@ -71,7 +71,22 @@ export const CUT_TIME_K = 3.78;
 export const DEFAULT_LASER_SPEED = 10; // mm/s
 export const DEFAULT_LASER_PASSES = 5;
 
-export function estimateCutSeconds(holeCount: number, speedMmS: number, passes: number): number {
+/**
+ * `extraPathMm` is continuous cut LENGTH (the bottom separation cut, at
+ * pi*D per pass), charged at plain length/speed rather than through
+ * CUT_TIME_K. The per-hole constant above is dominated by rotary
+ * repositioning overhead, and a single unbroken circumferential cut has none:
+ * the axis just spins. That makes this term the one place the model is
+ * honestly a path-length model — it is also uncalibrated, but it is small
+ * (~1.7 min at Standard on a 65mm can) next to the perforation time it sits
+ * beside, so a rough term beats leaving it out and under-reporting.
+ */
+export function estimateCutSeconds(
+  holeCount: number,
+  speedMmS: number,
+  passes: number,
+  extraPathMm = 0
+): number {
   if (speedMmS <= 0) return Infinity;
-  return holeCount * CUT_TIME_K * passes / speedMmS;
+  return (holeCount * CUT_TIME_K + extraPathMm) * passes / speedMmS;
 }

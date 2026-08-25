@@ -66,6 +66,8 @@ export interface Can3D {
     widthPx?: number;
     /** draws the LED wire hole's cable exiting the can at this angle; null/undefined hides it */
     ledNotch?: { x: number; r: number } | null;
+    /** base severed (see BottomCutSpec) — the bottom cap reads as an opening */
+    bottomOpen?: boolean;
   }): void;
 }
 
@@ -167,6 +169,7 @@ export function createCan3D(mount: HTMLElement): Can3D {
     maxHeightPx?: number;
     widthPx?: number;
     ledNotch?: { x: number; r: number } | null;
+    bottomOpen?: boolean;
   }) {
     const { texture, lit, style, diameterMm, heightMm } = opts;
     // mount.clientWidth is a trap here: mount has no width of its own in
@@ -215,6 +218,18 @@ export function createCan3D(mount: HTMLElement): Can3D {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
 
+      // The separation cut, as a red ring around the foot of the can — the
+      // same annotation the flat preview draws, and for the same reason (a
+      // zero-width cut has no area to render, so what has to be visible is
+      // WHERE the can comes apart). Drawn into the strips rather than onto
+      // the bottom cap because the cap is edge-on at this fixed tilt and
+      // shows almost nothing; the ring wraps, so it reads from every angle.
+      if (opts.bottomOpen) {
+        const ring = Math.max(2, Math.round(heightPx * 0.006));
+        ctx.fillStyle = '#ff4d3d';
+        ctx.fillRect(0, canvas.height - ring, canvas.width, ring);
+      }
+
       const angle = i * stripAngle;
       canvas.style.width = `${stripWpx}px`;
       canvas.style.height = `${heightPx}px`;
@@ -230,6 +245,13 @@ export function createCan3D(mount: HTMLElement): Can3D {
     }
     topCap.style.transform = `translate(-50%, -50%) rotateX(90deg) translateZ(${heightPx / 2}px)`;
     botCap.style.transform = `translate(-50%, -50%) rotateX(90deg) translateZ(${-heightPx / 2}px)`;
+    // Base cut off: you are looking INTO the can, so the bottom face is the
+    // shaded inside of the far wall, not a lid. Dark in Lit too — the light
+    // module goes in through here and sits against whatever the can stands
+    // on, so this opening is the one place the lamp does NOT glow.
+    if (opts.bottomOpen) {
+      botCap.style.background = `radial-gradient(circle at 38% 34%, #16171b, #05060a 78%)`;
+    }
 
     if (opts.ledNotch) {
       // Same angle convention as strip i's rotateY(i * 360/STRIPS): a linear
