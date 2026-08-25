@@ -915,6 +915,7 @@ function syncInputs() {
     for (const b of document.querySelectorAll<HTMLElement>('#photoModeSeg button')) {
       b.classList.toggle('active', b.dataset.photomode === state.photoMode);
     }
+    setText('photoKindLabel', state.photoImage ? (state.photoMode === 'portrait' ? 'Portraits' : 'General') : '');
     // the two pipelines have disjoint controls; showing both would imply the
     // inactive set is doing something
     const isPortrait = state.photoMode === 'portrait';
@@ -1242,14 +1243,14 @@ async function loadPhotoFile(file: File | undefined | null) {
         if (!photoModeTouched) state.photoMode = 'portrait';
         state.headHeightFrac = DEFAULT_HEAD_HEIGHT_FRAC;
         reframeOnFace();
-        faceMsg = `Face found — framed on it, ${Math.round(state.faceBox.w)}px wide in your photo.`;
+        faceMsg = `Face found — framed on it, ${Math.round(state.faceBox.w)}px wide in your image.`;
       } else {
         if (!photoModeTouched) state.photoMode = 'photo';
-        faceMsg = 'No face found, so this is being treated as a picture. Switch to “A face” to force the face pipeline.';
+        faceMsg = 'No face found — using the General pipeline. Switch to Portraits to force it.';
       }
     } catch {
       if (!photoModeTouched) state.photoMode = 'photo';
-      faceMsg = "Couldn't load the face detector, so this is being treated as a picture.";
+      faceMsg = "Couldn't load the face detector — using the General pipeline.";
     }
     setText('faceStatus', faceMsg);
 

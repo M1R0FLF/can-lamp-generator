@@ -60,7 +60,7 @@
         <div class="segmented" id="sourceSeg">
           <button data-source="preset" class="active">Preset</button>
           <button data-source="custom">Make your own</button>
-          <button data-source="photo">Your photo</button>
+          <button data-source="photo">Own image</button>
         </div>
 
         <div id="presetPane" style="margin-top:10px;">
@@ -104,7 +104,7 @@
       </details>
 
       <details class="ctrl" id="photoPane" open data-mobile="open" style="display:none;">
-        <summary>Your photo</summary>
+        <summary>Own image <span class="tag" id="photoKindLabel"></span></summary>
 
         <div class="dropzone" id="photoDrop" tabindex="0" role="button"
              aria-label="Choose an image, or drop one here">
@@ -112,16 +112,20 @@
           <span>or click to choose a file</span>
         </div>
         <input type="file" id="photoFile" accept="image/*" style="display:none;" />
-        <p class="hint" id="photoStatus">A face or a bold, high-contrast subject works best.</p>
+        <p class="hint" id="photoStatus">A portrait works best. Bold, high-contrast subjects also work well.</p>
 
         <div id="photoProps" style="display:none;">
           <div class="field" style="margin-top:10px;">
-            <label>What is this picture?</label>
+            <label>Kind of image</label>
             <div class="segmented" id="photoModeSeg">
-              <button data-photomode="portrait" class="active">A face</button>
-              <button data-photomode="photo">Any picture</button>
+              <button data-photomode="portrait" class="active">Portraits</button>
+              <button data-photomode="photo">General</button>
             </div>
             <p class="hint" id="faceStatus"></p>
+            <p class="hint">Portraits finds the face, frames the can on it and uses a
+              much finer dot pitch — that combination is what makes a face readable
+              from across a room. General is the all-purpose pipeline for everything
+              else.</p>
           </div>
 
           <div id="portraitProps">
