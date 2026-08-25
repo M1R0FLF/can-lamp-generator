@@ -52,16 +52,16 @@ export const GENERATORS: Generator[] = [
     id: 'smooth',
     name: 'Smooth',
     hint:
-      'Blue-noise dots. Cleanest flat tones and gradients — no grain — ' +
-      'at the cost of a little fine detail. Best for skies, skin, big soft shapes.',
+      'Cleanest flat tones and gradients — no grain at all — at the cost of ' +
+      'a little fine detail. Best for skies, skin, big soft shapes.',
     dither: 'blue',
   },
   {
     id: 'detail',
     name: 'Detail',
     hint:
-      'Error diffusion. Holds about 13% more contrast in ~4mm features, so ' +
-      'eyes, lettering and thin lines survive. Best for photos.',
+      'Sharpest of the three: holds about 13% more contrast in ~4mm features, ' +
+      'so eyes, lettering and thin lines survive. Best for photos.',
     dither: 'diffusion',
   },
 ];
