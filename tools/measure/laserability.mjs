@@ -50,7 +50,7 @@ export default async function ({ page, argv }) {
       const ctx = L.photoFieldCtx(can);
       const src = L.sampleImage(bmp, ctx, place);
       const params = { ...L.DEFAULT_PHOTO_PARAMS,
-        gamma: L.solveAutoPunch(bmp, ctx.W, ctx.H, place, L.DEFAULT_PHOTO_PARAMS, t.pitchMm) };
+        gamma: L.solveAutoPunch(bmp, ctx.W, ctx.H, place, L.DEFAULT_PHOTO_PARAMS, st) };
       const r = L.generate(can, { kind: 'photo', source: src, params }, st);
       let smallest = Infinity, area = 0;
       const hist = {};

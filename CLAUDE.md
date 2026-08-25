@@ -195,6 +195,103 @@ Three things that are easy to get wrong here:
 The target is anchored on the single setting a human approved. If results drift, change
 that number and nothing else.
 
+**Superseded for the general pipeline by rule 4d.** The contrast target above was
+measured on a face, and once faces moved to `portrait.ts` the only pipeline still calling
+it was the one that never sees a face. Rule 4d is what replaced it and why; 4b and 4c
+stay because their reasoning about *what* a can can output is what 4d is built on.
+
+### 4d. When a pipeline forks, its tuning does not follow — check what the constants were measured on
+
+`photo.ts` was the face pipeline, then `portrait.ts` took the faces and left `photo.ts`
+serving everything that is *not* a face. Its defaults stayed where faces had put them,
+and the result was reported as *"the general one is way too dark, it looks better on
+portrait mode, even if there is no face"* — a general photo losing to a pipeline
+deliberately specialised for something else.
+
+Every one of these had a portrait rationale in its own comment, and each was measured
+over 18 real photographs after the fork:
+
+- **`vignette: 0.7` was the whole bug.** It was justified as rule 3b subject dominance:
+  on a portrait the frame is where the background lives, so darkening toward it is the
+  one control that suppresses background without touching the subject. On a landscape,
+  an object or an animal, the frame is *more picture*, so it was spending a quarter of
+  the can's light suppressing the subject. Ablated, it is worth 51% of the open area and
+  every other stage is worth under 6%:
+
+  | | mean field | open area over the covered band |
+  |---|---|---|
+  | as shipped (0.7) | 0.361 | 3.35% |
+  | vignette 0.35 | 0.428 | 4.11% |
+  | vignette 0 | 0.499 | 5.05% |
+  | localContrast 0 | 0.344 | 3.15% *(darker)* |
+  | posterize off | 0.358 | 3.26% |
+  | edgeBoost 0 | 0.360 | 3.34% |
+
+  Note the direction on `localContrast`: turning it *off* is darker, which is rule 4's
+  corollary about the halo measured a third time. Don't go looking there for light.
+
+- **A face-anchored solver clamps on general images.** `solveAutoPunch` matched relative
+  local contrast against a value measured on one approved portrait. Over 18 non-face
+  photographs it hit a clamp on **12** — 9 on the floor, 3 on the ceiling. A solver that
+  saturates on two thirds of its inputs is choosing between two constants, not adapting;
+  worse, it *fought the vignette fix*, answering more light by raising gamma and taking
+  it straight back out (g0.94 → g1.06 on one image). It now closes the loop on open area
+  over the covered band, targeting 4.5% — the top of rule 8's rated-good range, and a
+  quantity a human actually calibrated. **The band, not the whole wall**: a `fade`
+  medallion covers ~62% of the circumference, and a whole-wall target tries to recover
+  the dark surround's missing light by blowing out the picture.
+
+- **Clamps become the design once the target is brightness.** They are what an image that
+  cannot reach the target rests against, so they decide how a very dark or very bright
+  photo comes out — and both had been calibrated against the old, dimmer tuple. Widening
+  0.6-1.6 → 0.5-2.4 put all 18 inside rule 8's band. Do not open them further: 0.4 lifts
+  genuine shadow into mid-tone and rule 5 says the real blacks are what carry the image.
+  A low-key photograph resting on the floor and *staying dark* is the right answer.
+
+Two things fell out of this that are worth keeping separately in mind.
+
+**A photo cannot draw itself a bigger bright shape, so its sampler tuple has to be more
+generous than a preset's.** `QUALITY_PRESETS` Standard runs a hole-diameter-to-pitch ratio
+of 0.359 and measures 0.434mm of web against rule 2's 0.30mm floor — a third of the
+available web, and therefore a quarter of the available light, left unspent. Holding
+`PHOTO_QUALITY` to `PORTRAIT_QUALITY`'s 0.40 ratio *and* easing jitter off at the same
+time is brighter and safer at an identical hole count and cut time, because jitter eats
+web at roughly twice the nominal rate:
+
+| tuple | max open | worst web |
+|---|---|---|
+| 1.45/0.52 jitter 0.15 (preset ladder) | 11.66% | 0.434mm |
+| 1.45/0.58 jitter 0.15 | 14.51% | 0.374mm |
+| **1.45/0.58 jitter 0.10** | **14.51%** | **0.536mm** |
+
+What it gives up is lattice irregularity, which a photograph can afford because its own
+tone varies everywhere — the presets need jitter 0.15 for their large areas of constant
+tone. Below ~0.05 the hex lattice reads as vertical striping and wants `rowShift` instead.
+
+**Rule 10's "open area must stay flat across the set" applies to the quality ladder too.**
+`QUALITY_PRESETS`'s maximum open area runs 7.20% at Draft to 15.11% at Ultra, because
+`dMax` was scaled by eye rather than held to a ratio. On a preset that barely shows, since
+the artwork's own tone structure dominates. On a photograph it makes the Quality picker a
+second brightness control — exactly what rule 10 says an axis must never be. A constant
+ratio lands every rung of `PHOTO_QUALITY` within 1% of 14.5%.
+
+**What the metrics could not settle, again.** Two of the images came out at essentially
+unchanged mean brightness (4.53% → 4.59%) while looking completely different: the before
+was one formless bright blob, the after resolved into separate objects with real dark
+gaps between them. The tone curve was buying structure rather than light, and only the
+render showed it. Same for the medallion edge below — a number never flagged it.
+
+**A medallion's edge close-out is structural and must not ride on a look control.** In
+`fade` mode the image occupies a centred band, and if tone is still finite where the band
+ends then the holes just stop at a hard vertical line: a cropped rectangle floating on the
+can. The comment in `buildPhotoField` claimed the vignette took tone to zero before x=0.
+It did not — at vignette 0.7 the band edge sat at 0.30 of full tone and then fell off a
+cliff, because the only thing actually zeroing it was the `cover` mask. That conflation is
+what made `vignette` un-lowerable in the first place, and it is rule 10's lesson in
+another corner of the engine: **an axis that is secretly load-bearing for something else
+cannot be tuned.** The close-out (`SEAM_FADE_FRAC`) is now unconditional and independent
+of `vignette`, and applies only when the image really is a medallion.
+
 ### 5. Density carries tone, not size
 
 Hole diameter alone spans maybe 4× in area — not enough. Real blacks (no holes at all)

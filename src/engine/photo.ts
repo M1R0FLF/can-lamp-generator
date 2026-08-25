@@ -11,6 +11,7 @@
 // A photo also does not wrap. `seam` handles that explicitly rather than
 // leaving a visible discontinuity at x=0.
 import { FieldCtx, boxBlur, clamp01, guidedSelf } from './fieldkit';
+import { DEFAULT_STIPPLE, StippleParams, stipple } from './stipple';
 
 /**
  * sRGB transfer-function tables, so luminance is computed from LIGHT rather
@@ -215,6 +216,59 @@ export const PHOTO_STIPPLE = {
 };
 
 /**
+ * Quality ladder for general photographs, replacing QUALITY_PRESETS when a
+ * photo is loaded — the same arrangement PORTRAIT_QUALITY already has, and for
+ * the same reason: a photograph and a preset want different tuples, and the
+ * quality part is applied after the design's own, so a preset tuple would
+ * otherwise overwrite whatever the photo asked for.
+ *
+ * Two things are different from the preset ladder, both measured over 18 real
+ * photographs (tools/measure/photos.mjs).
+ *
+ * 1. MAXIMUM OPEN AREA IS FLAT ACROSS THE LADDER. The preset ladder's is not:
+ *    it runs 7.20% at Draft, 11.66% at Standard, 14.51% at Fine and 15.11% at
+ *    Ultra, because dMax was scaled by eye rather than held to a ratio. On a
+ *    preset that hardly shows — the artwork's own tone structure dominates.
+ *    On a photograph it makes the Quality picker a second brightness control,
+ *    which is exactly what CLAUDE.md rule 10 says an axis must never be
+ *    ("open area must stay flat across the set, or the picker doubles as a
+ *    brightness control and every switch needs the tone sliders re-tuned").
+ *    Holding dMax/pitch at 0.40 lands every tuple within 1% of 14.5%.
+ *
+ * 2. IT IS BRIGHTER, AND AT THE SAME TIME SAFER. 0.40 is PORTRAIT_QUALITY's
+ *    ratio, not a new gamble; the preset ladder's Standard runs 0.359 and
+ *    measures 0.434mm of web against rule 2's 0.30mm floor, i.e. it was
+ *    leaving a third of the available web — and therefore a quarter of the
+ *    available light — unspent. A photograph has nowhere else to get
+ *    brightness from: unlike a preset it cannot simply draw a bigger bright
+ *    shape.
+ *
+ *    Bigger holes alone would spend that margin (1.45/0.58 at the preset
+ *    ladder's jitter 0.15 measures 0.374mm, and 0.274mm once ±0.05mm of
+ *    positional error is allowed for, i.e. under the floor). Easing jitter off
+ *    at the same time buys back MORE than the holes cost, because jitter is a
+ *    fraction of pitch and eats web at twice the nominal rate:
+ *
+ *      1.45/0.52 jitter 0.15   11.66% max   0.434mm worst web   (shipped)
+ *      1.45/0.58 jitter 0.15   14.51% max   0.374mm
+ *      1.45/0.58 jitter 0.10   14.51% max   0.536mm             <- chosen
+ *
+ *    So this ladder is 24% brighter than the preset one AND has 23% more web,
+ *    at an identical hole count and cut time. What it gives up is lattice
+ *    irregularity; that is affordable here because a photograph's own tone
+ *    varies everywhere, so there is no flat region for the residual grid to
+ *    show itself in (the presets' jitter 0.15 exists for their large areas of
+ *    constant tone). Below jitter ~0.05 the hex lattice reads as vertical
+ *    striping and needs `rowShift` instead — see stipple.ts.
+ */
+export const PHOTO_QUALITY = [
+  { label: 'Draft', pitch: 2.2, dMin: 0.32, dMax: 0.88, jitter: 0.15 },
+  { label: 'Standard', pitch: 1.45, dMin: 0.28, dMax: 0.58, jitter: 0.1 },
+  { label: 'Fine', pitch: 1.15, dMin: 0.24, dMax: 0.46, jitter: 0.08 },
+  { label: 'Ultra', pitch: 0.98, dMin: 0.2, dMax: 0.39, jitter: 0.05 },
+];
+
+/**
  * Tone defaults for photographs.
  *
  * ---------------------------------------------------------------------------
@@ -249,14 +303,38 @@ export const PHOTO_STIPPLE = {
  * curve does no visible harm.
  *
  * ---------------------------------------------------------------------------
- * `vignette`: 0.7, because it is subject dominance, not decoration
+ * `vignette`: 0.3 — this pipeline no longer has a background to suppress
  * ---------------------------------------------------------------------------
- * The falloff darkens toward the frame, and on a portrait the frame is exactly
- * where the background lives. It is therefore the one control that suppresses
- * background without touching the subject, which is rule 3b's "give the hero
- * genuinely dark breathing room". Measured in the right direction: dropping it
- * from 0.55 to 0.35 raised background open area from 3.64% to 4.51% with the
- * face unchanged. Raised to 0.7 for the same reason, in reverse.
+ * This was 0.7, and the reasoning for it was sound at the time and is now
+ * simply about a different pipeline. The argument was rule 3b subject
+ * dominance: the falloff darkens toward the frame, on a PORTRAIT the frame is
+ * exactly where the background lives, so it is the one control that suppresses
+ * background without touching the subject.
+ *
+ * Faces then moved out to portrait.ts — which chose 0.35 for itself, having
+ * gained adaptive framing that crops most of the background away — and left
+ * this file holding a portrait's tuning while serving everything that is NOT a
+ * portrait. On a landscape, an object, an animal, a building, there is no
+ * "background at the frame" to suppress; the frame is more picture. So the
+ * control was spending a quarter of the can's light suppressing the subject.
+ *
+ * It is by a wide margin the biggest darkener in the pipeline. Ablated over 18
+ * real photographs, mean open area over the covered band:
+ *
+ *   as shipped (0.7)     3.35%        localContrast 0    3.15%  (darker)
+ *   vignette 0.35        4.11%        posterize off      3.26%
+ *   vignette 0           5.05%        edgeBoost 0        3.34%
+ *
+ * i.e. every other stage is worth less than 6% and the vignette is worth 51%.
+ * That is the "way too dark" report, and why the fix is here rather than in
+ * the tone curve.
+ *
+ * 0.3 rather than 0: some falloff is still wanted. On a full wrap the
+ * horizontal falloff darkens toward x=0/W, which rule 9 establishes as the
+ * BACK of the can, so it hides the one place a photograph cannot be made
+ * continuous. What it must no longer do is carry the seam on its own — see
+ * SEAM_FADE_FRAC in buildPhotoField(), which took that job over precisely so
+ * that this number is free to be a look.
  *
  * `invert` stays a manual button. Auto-detecting bright-background portraits
  * and flipping them was tried, worked exactly as designed, and looked worse:
@@ -280,116 +358,145 @@ export const DEFAULT_PHOTO_PARAMS: PhotoParams = {
   // kept low by default: edge boost also amplifies background grain, which
   // shows up as stray specks around the subject
   edgeBoost: 0.1,
-  vignette: 0.7,
+  vignette: 0.3,
   ambient: 0.0,
 };
 
 /**
  * Measurement resolution for the auto-Punch solve, in px/mm.
  *
- * MUST be kept in step with AUTO_PUNCH_TARGET below — the two are one
- * calibration, not two independent knobs. Relative local contrast is
- * resolution-dependent because a lower-resolution field carries less fine
- * detail: the same approved setting measures 0.2064 here at 2 px/mm and 0.1959
- * at the render's 8. Changing this constant without re-deriving the target
- * silently biases every solve (it first shipped mismatched, and drove a
- * portrait that wanted 0.70 down onto the 0.60 clamp).
+ * Lower than the render's 8 because the solve builds the field three times.
+ * Unlike the contrast target this replaced, the quantity being matched here is
+ * a physical open-area fraction rather than a resolution-dependent index, so
+ * this constant is no longer half of a calibration — but it is not free of
+ * resolution either: a coarser field is a slightly blurrier one, which narrows
+ * the tone distribution and so moves E[tone^k]. Measured over the 9 of 18 test
+ * photographs whose solve does not hit a clamp (a clamped one measures the
+ * clamp, not the solve), mean |error| in the open area actually rendered at
+ * 8 px/mm, against the target:
+ *
+ *   probe ppm    2       4       8
+ *   error      2.16%   0.69%   0.17%
+ *
+ * 4 is the knee: a quarter of the error of probing at 2, for a sixteenth of the
+ * cost of solving at the render's 8.
+ *
+ * It is not free — three field builds at 4 px/mm measure ~240ms warm, against
+ * the ~200ms budget CLAUDE.md sets for a full regeneration. That is affordable
+ * only because this runs once per image load or pipeline switch and never on a
+ * slider drag, and because a load is already paying for a decode, the face
+ * cascade and a draft render. If it ever needs to run more often than that,
+ * drop to 3 px/mm before giving up the refinement step — the refinement is
+ * worth more than the resolution (0.69% against 1.47% at this resolution).
  */
-const PROBE_PPM = 2;
+const PROBE_PPM = 4;
 
 /**
- * Target for auto-Punch, in units of whole-image relative local contrast
- * (RMS of the 4mm high-pass over the mean, across the covered area), measured
- * at PROBE_PPM.
+ * Target for auto-Punch: open area over the covered band, in percent.
  *
- * Anchored on the ONE setting a human has explicitly approved: portrait 1 at
- * gamma 0.7, which measures 0.2064 at this resolution. Everything else here is
- * machinery; this number is the whole judgement, so it is the number to change
- * if results drift.
+ * ---------------------------------------------------------------------------
+ * Why this is a BRIGHTNESS target and not the contrast one it replaces
+ * ---------------------------------------------------------------------------
+ * The previous target was whole-image relative local contrast, anchored on the
+ * single value a human had approved: portrait 1 at gamma 0.7. That was the
+ * right anchor for the pipeline as it then stood, which was the FACE pipeline.
+ * Faces have since moved to portrait.ts, and portrait.ts does not call this
+ * function at all — so the one approved measurement holding the target up was
+ * taken on an image this code path no longer sees.
  *
- * A single target transfers between images at all only because the quantity
- * itself does. Measured on two portraits at the settings each wanted, contrast
- * came out within 9% of each other despite one being a bespectacled face with
- * dark hair and the other an evenly-lit studio shot, and despite the two
- * needing gammas nearly a factor of two apart.
+ * It does not transfer. Measured over 18 real non-face photographs, the solve
+ * hit a clamp on 12 of them: 9 pinned to the 0.60 floor and 3 to the 1.60
+ * ceiling. A solver that saturates on two thirds of its inputs is not adapting
+ * to the image, it is picking one of two constants — and it was worse than
+ * inert, because it actively fought the vignette fix above: lowering the
+ * vignette raises open area, so the contrast target answered by RAISING gamma
+ * and taking the light straight back out (g0.94 -> g1.06 on one image).
  *
- * It is measured over the WHOLE covered area rather than over the subject,
- * because nothing in production knows where the subject is — this project
- * cannot have a face detector (CLAUDE.md puts the halftone portrait generator
- * out of scope precisely because it needs OpenCV). That dilution has a real
- * cost, and it is worth being honest about its direction: an image with a large
- * flat background reads LOW, so the solver pushes its gamma further than a
- * subject-only measurement would. On the second portrait that lands 1.31 where
- * a face-only match would have said ~1.1 — more contrast and less brightness
- * than strictly necessary, which is at least the direction that image was
- * reported as needing. No single whole-image target can reproduce a face-only
- * match for both; that is the trade this approach makes.
+ * The reported failure is also not a contrast failure. It is "way too dark",
+ * which is a brightness failure, and brightness is measurable directly. So the
+ * loop now closes on the thing that is wrong.
+ *
+ * ---------------------------------------------------------------------------
+ * Why 4.5%, measured over the COVERED BAND
+ * ---------------------------------------------------------------------------
+ * Anchored on rule 8's guardrail, which is itself calibrated from a human
+ * rating pass over the whole preset library: the presets rated good measured
+ * 2.0-4.5% open and the ones rated too sparse sat at 1.3-1.7%. 4.5% is the top
+ * of the rated-good range (Escarcha), which is where a photograph wants to be
+ * — a preset can be dim and still read, because it is two big shapes, whereas
+ * a photograph has no such structure to fall back on and simply goes murky.
+ *
+ * Over the covered band rather than the whole wall because a 'fade' medallion
+ * covers ~62% of the circumference, and a whole-wall target would try to
+ * recover the dark surround's missing light by blowing out the picture. The
+ * band figure is what the eye actually reads; on a full wrap the two are the
+ * same number.
+ *
+ * ---------------------------------------------------------------------------
+ * The clamps are load-bearing now, in one direction
+ * ---------------------------------------------------------------------------
+ * A brightness target on a genuinely low-key photograph — a night scene, a
+ * dark object on black — would lift it into flat grey and destroy the real
+ * blacks that rule 5 says carry the image. AUTO_PUNCH_MIN is what stops that:
+ * such an image runs out of gamma before it reaches the target and stays dark,
+ * which is the correct answer rather than a failed solve. Four of the 18 do
+ * exactly this and land at 2.0-4.0% instead of 4.5%; see AUTO_PUNCH_MIN for
+ * where that floor was put and why not lower.
  */
-export const AUTO_PUNCH_TARGET = 0.2064;
+export const AUTO_PUNCH_OPEN_PCT = 4.5;
 
-/** Bounds on the solved value, so a pathological image cannot produce a silly one. */
-const AUTO_PUNCH_MIN = 0.6;
-const AUTO_PUNCH_MAX = 1.6;
+/**
+ * Bounds on the solved value.
+ *
+ * These stopped being mere sanity rails when the target became brightness:
+ * they are now what an image that CANNOT reach the target rests against, so
+ * they set how a very dark or very bright photograph comes out. Both moved
+ * outward when the target changed, measured over 18 photographs by how many
+ * ended up outside rule 8's 1.8-8% band:
+ *
+ *   bounds        at floor  at ceiling  under 1.8%  over 8%
+ *   0.6 - 1.6         4          5           1         0
+ *   0.6 - 2.4         4          2           1         0
+ *   0.5 - 2.4         4          2           0         0     <- chosen
+ *   0.4 - 3.0         3          2           0         0
+ *
+ * The old 1.6 ceiling was calibrated against the old, dimmer sampler tuple; a
+ * bright flat image now has further to come down, and five of the eighteen were
+ * resting on it. The old 0.6 floor left the darkest image at exactly 1.80% —
+ * on rule 8's floor to the pixel, i.e. at the edge of "reads as broken". 0.5
+ * clears it at 2.04%.
+ *
+ * Not opened wider than that on purpose. 0.4 would take the darkest image to
+ * 2.34% but starts lifting genuine shadow into the mid-tones, and rule 5 is
+ * explicit that real blacks are what make an image read. A low-key photograph
+ * resting on the floor and staying dark is the correct answer, not a failure.
+ */
+const AUTO_PUNCH_MIN = 0.5;
+const AUTO_PUNCH_MAX = 2.4;
 
-/** The two gammas the solver probes. Chosen to span the useful range. */
+/** The two gammas the solver probes first. Chosen to span the useful range. */
 const PUNCH_PROBES = [0.7, 1.3];
 
 /**
- * Relative local contrast at ~4mm scale over the covered area: RMS of the
- * high-pass divided by the mean.
+ * Solve for the `gamma` ("Punch") that lands this image on
+ * AUTO_PUNCH_OPEN_PCT of open area over its covered band.
  *
- * Normalised by the mean deliberately. Raw RMS scales with overall brightness,
- * so it scores any change that darkens the image as a loss of contrast even
- * when the features have become MORE distinct — which is exactly backwards for
- * choosing a tone curve, and it sent an earlier version of this measurement
- * the wrong way.
- */
-function relativeLocalContrast(
-  field: Float32Array,
-  Wp: number,
-  Hp: number,
-  cover: Float32Array,
-  ppm: number
-): number {
-  const r = Math.max(1, Math.round(4 * ppm));
-  const blur = boxBlur(field, Wp, Hp, r, r);
-  let mean = 0;
-  let rms = 0;
-  let n = 0;
-  for (let i = 0; i < field.length; i++) {
-    if (cover[i] <= 0) continue;
-    mean += field[i];
-    const d = field[i] - blur[i];
-    rms += d * d;
-    n++;
-  }
-  if (n === 0) return 0;
-  mean /= n;
-  if (mean <= 1e-6) return 0;
-  return Math.sqrt(rms / n) / mean;
-}
-
-/**
- * Solve for the `gamma` ("Punch") that lands this image on AUTO_PUNCH_TARGET.
+ * Runs the REAL sampler rather than a model of it. Open area could be
+ * predicted analytically — response.ts measured the sampler's own exponent at
+ * 1.373, so open ~= maxOpen * E[tone^(1.373*gamma)] — but that exponent was
+ * measured for one tuple, holds only within 3% across the others, and would
+ * silently go stale the moment PHOTO_QUALITY changes. Calling stipple() costs
+ * a few thousand hole decisions per probe and is self-calibrating against
+ * whatever tuple, dither and knee are actually in play, which is the same
+ * reason the measurement harness samples the real thing instead of modelling
+ * it (CLAUDE.md's note on the 1x1 field).
  *
- * Punch trades face brightness against face contrast, and which value is right
- * is a property of the photograph, not a constant: a face with glasses and
- * dark hair carries its own contrast and wants a low value, while an evenly-lit
- * studio portrait needs nearly twice as much before its features separate from
- * the skin. A single default cannot serve both — reported as one image being
- * right and the other "too bright, you can't see face details".
- *
- * Closed loop rather than a heuristic: probe two gammas, measure what actually
- * comes out of the real tone pipeline, and interpolate. Relative contrast is
- * very nearly linear in gamma over this range (measured 0.190 -> 0.256 across
- * 0.6 -> 1.5, and 0.138 -> 0.212 on the other image), so two probes are enough
- * and a third would only confirm the straight line.
- *
- * Runs at PROBE_PPM (2 px/mm) instead of the render's 8, which makes the two
- * extra field builds about 1/16 the cost each. A 4mm feature is still 8 px
- * across there, so the measurement holds up while the solve stays a few tens
- * of milliseconds instead of most of a second — but see PROBE_PPM: the target
- * is calibrated to that resolution and the two must move together.
+ * Secant on log(open area) against gamma, two probes plus one refinement.
+ * log-linear because open area is E[tone^k] with k proportional to gamma:
+ * exactly straight for a single tone, gently convex for a real distribution,
+ * so two points get close and the third lands it. The refinement is worth its
+ * third field build — over the unclamped test photographs it takes mean
+ * |error| from 1.47% of target to 0.69%.
  */
 export function solveAutoPunch(
   img: HTMLImageElement | ImageBitmap,
@@ -397,24 +504,57 @@ export function solveAutoPunch(
   H: number,
   place: PhotoPlacement,
   params: PhotoParams,
-  pitchMm: number
+  tuple: Partial<StippleParams>
 ): number {
   const ctx = new FieldCtx(W, H, PROBE_PPM);
   const src = sampleImage(img, ctx, place);
-  const measured: number[] = [];
-  for (const g of PUNCH_PROBES) {
-    const built = buildPhotoField(src, ctx, { ...params, gamma: g }, pitchMm);
-    measured.push(relativeLocalContrast(built.field, ctx.Wp, ctx.Hp, src.cover, PROBE_PPM));
-  }
-  const [g0, g1] = PUNCH_PROBES;
-  const [c0, c1] = measured;
-  const slope = c1 - c0;
-  // A flat response means contrast does not respond to Punch at all (a blank
-  // or single-tone image). Nothing to solve; leave the default in place.
-  if (!isFinite(slope) || Math.abs(slope) < 1e-6) return params.gamma;
-  const solved = g0 + ((AUTO_PUNCH_TARGET - c0) / slope) * (g1 - g0);
-  if (!isFinite(solved)) return params.gamma;
-  return Math.min(AUTO_PUNCH_MAX, Math.max(AUTO_PUNCH_MIN, Math.round(solved * 100) / 100));
+  let coverN = 0;
+  for (let i = 0; i < src.cover.length; i++) if (src.cover[i] > 0) coverN++;
+  const coverFrac = coverN / Math.max(1, src.cover.length);
+  if (coverFrac <= 0) return params.gamma;
+  const pitchMm = tuple.pitchMm ?? DEFAULT_STIPPLE.pitchMm;
+
+  const clampRound = (g: number) =>
+    Math.min(AUTO_PUNCH_MAX, Math.max(AUTO_PUNCH_MIN, Math.round(g * 100) / 100));
+
+  // PHOTO_STIPPLE underneath the caller's tuple, exactly as generate() layers
+  // it — the solve has to sample through the same knee the render will use, and
+  // a caller passing only a quality tuple would otherwise be measured against
+  // DEFAULT_STIPPLE's preset-shaped knee of 0.42.
+  const sampler: Partial<StippleParams> = { ...PHOTO_STIPPLE, ...tuple };
+
+  /** open area over the covered band, in percent, at this gamma */
+  const openAt = (gamma: number): number => {
+    const built = buildPhotoField(src, ctx, { ...params, gamma }, pitchMm);
+    const r = stipple(built.field, ctx.W, ctx.H, ctx.Wp, ctx.Hp, ctx.PPM, sampler);
+    let area = 0;
+    for (const h of r.holes) area += Math.PI * h.r * h.r;
+    return (area / (ctx.W * ctx.H * coverFrac)) * 100;
+  };
+
+  const lt = Math.log(AUTO_PUNCH_OPEN_PCT);
+  const probe = (g: number) => ({ g, l: Math.log(openAt(g)) });
+  const secant = (a: { g: number; l: number }, b: { g: number; l: number }): number =>
+    Math.abs(b.l - a.l) < 1e-6 ? NaN : a.g + ((lt - a.l) * (b.g - a.g)) / (b.l - a.l);
+
+  const [lo, hi] = PUNCH_PROBES;
+  const a = probe(lo);
+  const b = probe(hi);
+  // A blank or single-tone image gives no slope to solve on, and an image that
+  // produces no holes at all gives -Infinity. Nothing to do but keep the
+  // default; the tone sliders are still there.
+  if (!isFinite(a.l) || !isFinite(b.l)) return params.gamma;
+  const first = secant(a, b);
+  if (!isFinite(first)) return params.gamma;
+
+  const g1 = clampRound(first);
+  // Refine against whichever original probe sits on the far side of the
+  // target, so the second step interpolates rather than extrapolating.
+  const c = probe(g1);
+  if (!isFinite(c.l)) return g1;
+  const other = (c.l > lt) === (a.l > lt) ? b : a;
+  const second = secant(c, other);
+  return isFinite(second) ? clampRound(second) : g1;
 }
 
 export interface PhotoSource {
@@ -559,6 +699,16 @@ function percentiles(src: Float32Array, mask: Float32Array, lo: number, hi: numb
   if (hiV - loV < 0.02) return [Math.max(0, loV - 0.05), Math.min(1, loV + 0.05)];
   return [loV, hiV];
 }
+
+/**
+ * Width of a medallion's edge close-out, as a fraction of the band width.
+ *
+ * Only has to be wide enough that the fade is not itself a visible edge. At
+ * Standard quality the wall carries ~140 samples across, so 8% of a 62%-
+ * coverage band is ~7 cells — a few holes' worth of ramp, which is enough to
+ * read as a fade and narrow enough not to cost real picture.
+ */
+const SEAM_FADE_FRAC = 0.08;
 
 export interface PhotoBuildResult {
   field: Float32Array<ArrayBufferLike>;
@@ -715,11 +865,27 @@ export function buildPhotoField(
     }
   }
 
-  // --- vignette + seam handling. In 'fade' mode the horizontal falloff is
-  // what makes the wrap work: tone reaches zero before x=0, so there are no
-  // holes at the seam and nothing to mismatch. ---
+  // --- vignette + seam handling ---
+  //
+  // These are two jobs, and they used to be one number. `vignette` is a look.
+  // Closing a medallion's edge down to zero is STRUCTURAL: in 'fade' mode the
+  // image occupies a centred band, and if tone is still finite where the band
+  // ends then the holes simply stop at a hard vertical line — a cropped
+  // rectangle floating on the can, not a vignetted medallion. (The old comment
+  // here claimed the falloff took tone to zero before x=0. It did not: at
+  // vignette 0.7 the band edge still sat at 1 - 0.7 = 0.30 of full tone and
+  // then fell off a cliff to nothing, because the only thing that actually
+  // zeroed it was the `cover` mask.)
+  //
+  // Conflating them is what made `vignette` un-lowerable, and it is exactly
+  // rule 10's lesson in a different corner of the engine: an axis that is
+  // secretly load-bearing for something else cannot be tuned. So the edge
+  // close-out is now unconditional and independent of `vignette`, over the
+  // outer SEAM_FADE_FRAC of the band, and only when the image really is a
+  // medallion (a full wrap covers every column and needs none of this).
   const vig = params.vignette;
   const coverX = new Float32Array(Wp);
+  const seamFade = new Float32Array(Wp);
   {
     // distance from the covered band's edges, in fractions of the band width
     let firstCol = Wp;
@@ -735,14 +901,27 @@ export function buildPhotoField(
       lastCol = Wp - 1;
     }
     const bandW = Math.max(1, lastCol - firstCol);
+    // A band that reaches both edges is a full wrap; anything narrower is a
+    // medallion whose edges have to be closed out.
+    const medallion = firstCol > 0 || lastCol < Wp - 1;
     for (let col = 0; col < Wp; col++) {
       if (col < firstCol || col > lastCol) {
         coverX[col] = 0;
+        seamFade[col] = 0;
         continue;
       }
       const t = (col - firstCol) / bandW; // 0..1 across the band
       const edge = Math.min(t, 1 - t) * 2; // 0 at either edge, 1 at centre
       coverX[col] = vig > 0 ? Math.pow(Math.min(1, edge / 0.55), 1.1) : 1;
+      if (!medallion) {
+        seamFade[col] = 1;
+        continue;
+      }
+      // Smoothstep rather than a linear ramp: a linear fade leaves a visible
+      // kink where it meets full tone, and at ~140 samples across the wall a
+      // kink is a couple of cells wide and reads as a band.
+      const u = Math.min(1, Math.min(t, 1 - t) / SEAM_FADE_FRAC);
+      seamFade[col] = u * u * (3 - 2 * u);
     }
   }
   for (let row = 0; row < Hp; row++) {
@@ -752,7 +931,7 @@ export function buildPhotoField(
     for (let col = 0; col < Wp; col++) {
       const i = row * Wp + col;
       const shade = 1 - vig * (1 - Math.min(coverX[col], vy));
-      f[i] *= Math.max(0, shade) * (src.cover[i] > 0 ? 1 : 0);
+      f[i] *= Math.max(0, shade) * seamFade[col] * (src.cover[i] > 0 ? 1 : 0);
     }
   }
 

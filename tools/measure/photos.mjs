@@ -48,7 +48,11 @@ export default async function ({ run, page, argv }) {
       const { dataUrl, diameter, height } = arg;
       const D = diameter, H = height, PPM = 8, W = Math.PI * D, SP = 6;
       const can = { diameterMm: D, heightMm: H, ppm: PPM };
-      const q = L.QUALITY_PRESETS[1];
+      // PHOTO_QUALITY, not QUALITY_PRESETS: a loaded photo gets its own ladder
+      // (see its comment in photo.ts), and measuring the preset one would be
+      // measuring a look no user sees — the same drift this file already
+      // records for auto-Punch below.
+      const q = L.PHOTO_QUALITY[1];
       const base = { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter };
 
       const img = await new Promise((res, rej) => {
@@ -68,7 +72,7 @@ export default async function ({ run, page, argv }) {
       // if you add another on-load step, add it here too.)
       const params = {
         ...L.DEFAULT_PHOTO_PARAMS,
-        gamma: L.solveAutoPunch(bmp, ctx.W, ctx.H, place, L.DEFAULT_PHOTO_PARAMS, base.pitchMm),
+        gamma: L.solveAutoPunch(bmp, ctx.W, ctx.H, place, L.DEFAULT_PHOTO_PARAMS, base),
       };
 
       const paint = (holes, lit) => {
@@ -87,6 +91,14 @@ export default async function ({ run, page, argv }) {
         return c;
       };
 
+      // Fraction of the wall the image actually occupies. A 'fade' medallion
+      // covers ~62% of the circumference, so its whole-wall open area is held
+      // down by dark metal that was never part of the picture; rule 8's band
+      // is about what the eye reads, so the band figure is the one to judge.
+      let coverN = 0;
+      for (let i = 0; i < src.cover.length; i++) if (src.cover[i] > 0) coverN++;
+      const coverFrac = coverN / src.cover.length;
+
       const shots = [];
       const stats = [];
       for (const [gname, dither] of [['classic', 'hash'], ['smooth', 'blue'], ['detail', 'diffusion']]) {
@@ -96,6 +108,7 @@ export default async function ({ run, page, argv }) {
           gen: gname,
           holes: r.holes.length,
           openPct: (area / (r.W * r.H)) * 100,
+          bandOpenPct: (area / (r.W * r.H * coverFrac)) * 100,
           minWeb: r.minWeb,
           cutSeconds: L.estimateCutSeconds(r.holes.length, L.DEFAULT_LASER_SPEED, L.DEFAULT_LASER_PASSES),
         });
@@ -117,13 +130,14 @@ export default async function ({ run, page, argv }) {
   for (const r of rows) {
     console.log(`${r.name}  (${r.w}x${r.h}, placed as ${r.seam}${r.seam === 'fade' ? ` @ ${Math.round(r.coverage * 100)}%` : ''}, auto-Punch ${r.punch})`);
     for (const s of r.stats) {
-      const openFlag = s.openPct < MIN_OPEN ? '  <-- UNDER rule 8 floor' : s.openPct > MAX_OPEN ? '  <-- OVER rule 8 ceiling' : '';
+      const openFlag = s.bandOpenPct < MIN_OPEN ? '  <-- UNDER rule 8 floor' : s.bandOpenPct > MAX_OPEN ? '  <-- OVER rule 8 ceiling' : '';
       const webFlag = s.minWeb < MIN_WEB ? '  <-- UNDER rule 2 floor' : '';
       const hrs = Math.floor(s.cutSeconds / 3600), mins = Math.round((s.cutSeconds % 3600) / 60);
       console.log(
         '  ' + s.gen.padEnd(8),
         String(s.holes).padStart(6) + ' holes',
-        (s.openPct.toFixed(2) + '% open').padStart(12),
+        (s.openPct.toFixed(2) + '% wall').padStart(12),
+        (s.bandOpenPct.toFixed(2) + '% band').padStart(12),
         (s.minWeb.toFixed(3) + 'mm web').padStart(13),
         `~${hrs}h${String(mins).padStart(2, '0')}`.padStart(8),
         openFlag + webFlag

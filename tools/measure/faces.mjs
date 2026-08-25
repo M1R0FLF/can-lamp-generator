@@ -142,7 +142,7 @@ export default async function ({ page, argv }) {
         let field;
         if (!over) {
           const pp = { ...L.DEFAULT_PHOTO_PARAMS,
-            gamma: L.solveAutoPunch(bmp, ctx.W, ctx.H, place, L.DEFAULT_PHOTO_PARAMS, TUPLE.pitchMm) };
+            gamma: L.solveAutoPunch(bmp, ctx.W, ctx.H, place, L.DEFAULT_PHOTO_PARAMS, TUPLE) };
           field = L.buildPhotoField(src, ctx, pp, TUPLE.pitchMm).field;
         } else {
           const pp = { ...L.DEFAULT_PORTRAIT_PARAMS, faceWidthMm: faceW, ...over };
