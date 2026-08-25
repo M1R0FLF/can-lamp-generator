@@ -20,6 +20,7 @@ import {
   DEFAULT_PHOTO_PARAMS,
   DEFAULT_PLACEMENT,
   PHOTO_STIPPLE,
+  PHOTO_QUALITY,
   sampleImage,
   placementFor,
 } from './engine/photo';
@@ -330,12 +331,21 @@ function effectiveStipple(): StippleParams {
   // the quality part is applied after it and would otherwise overwrite the
   // portrait pitch with a preset one, throwing away the pipeline's single most
   // important variable.
-  const portraitMode =
-    state.sourceKind === 'photo' && !!state.photoImage && state.photoMode === 'portrait';
+  //
+  // A general photograph has its own ladder for the same reason (PHOTO_QUALITY):
+  // the preset ladder's maximum open area is not flat across its rungs, which
+  // on a photo makes the Quality picker a second brightness control, and it
+  // spends only two thirds of the available web so a photo comes out dimmer
+  // than the machine can actually cut.
+  const photoLoaded = state.sourceKind === 'photo' && !!state.photoImage;
+  const portraitMode = photoLoaded && state.photoMode === 'portrait';
   let qualityPart: Partial<StippleParams> = {};
   if (portraitMode) {
     const q = PORTRAIT_QUALITY[Math.min(PORTRAIT_QUALITY.length - 1, state.qualityIndex)];
     qualityPart = { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter, rowShift: q.rowShift };
+  } else if (photoLoaded) {
+    const q = PHOTO_QUALITY[Math.min(PHOTO_QUALITY.length - 1, state.qualityIndex)];
+    qualityPart = { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter };
   } else {
     const q = QUALITY_PRESETS[state.qualityIndex];
     if (q) qualityPart = { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter };
@@ -1269,7 +1279,7 @@ async function loadPhotoFile(file: File | undefined | null) {
     if (!punchTouched && state.photoMode === 'photo') {
       state.photoParams.gamma = solveAutoPunch(
         bmp, Math.PI * state.diameterMm, state.heightMm,
-        state.photoPlacement, state.photoParams, effectiveStipple().pitchMm
+        state.photoPlacement, state.photoParams, effectiveStipple()
       );
     }
     // Loading an image IS choosing the photo source. Without this, dropping a
@@ -1397,6 +1407,21 @@ el('photoModeSeg').addEventListener('click', (e) => {
     state.photoPlacement = placementFor(
       state.photoImage.width, state.photoImage.height, Math.PI * state.diameterMm, state.heightMm
     );
+    // Solve Punch on the way in, not just on load. Auto-Punch is part of what
+    // "the General pipeline" MEANS — it is solved per image and spans 0.5-2.4,
+    // so an unsolved DEFAULT_PHOTO_PARAMS.gamma is not a neutral starting point
+    // but an arbitrary one. Only load() used to do this, so a photo that
+    // arrived in Portraits mode (the default when a face is found) and was then
+    // switched here by hand ran at the raw default — which is most of a stop
+    // dark on a typical image, and is exactly the path someone comparing the
+    // two modes takes. Must follow the placement above: the solve measures
+    // open area over the covered band, so it depends on the coverage.
+    if (!punchTouched) {
+      state.photoParams.gamma = solveAutoPunch(
+        state.photoImage, Math.PI * state.diameterMm, state.heightMm,
+        state.photoPlacement, state.photoParams, effectiveStipple()
+      );
+    }
   }
   photoCache = null;
   syncInputs();
@@ -1459,7 +1484,7 @@ el('photoReset').addEventListener('click', () => {
   if (state.photoImage) {
     state.photoParams.gamma = solveAutoPunch(
       state.photoImage, Math.PI * state.diameterMm, state.heightMm,
-      state.photoPlacement, state.photoParams, effectiveStipple().pitchMm
+      state.photoPlacement, state.photoParams, effectiveStipple()
     );
   }
   syncInputs();
