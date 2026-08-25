@@ -60,7 +60,7 @@
         <div class="segmented" id="sourceSeg">
           <button data-source="preset" class="active">Preset</button>
           <button data-source="custom">Make your own</button>
-          <button data-source="photo">Your photo</button>
+          <button data-source="photo">Own image</button>
         </div>
 
         <div id="presetPane" style="margin-top:10px;">
@@ -104,7 +104,7 @@
       </details>
 
       <details class="ctrl" id="photoPane" open data-mobile="open" style="display:none;">
-        <summary>Your photo</summary>
+        <summary>Own image <span class="tag" id="photoKindLabel"></span></summary>
 
         <div class="dropzone" id="photoDrop" tabindex="0" role="button"
              aria-label="Choose an image, or drop one here">
@@ -112,9 +112,64 @@
           <span>or click to choose a file</span>
         </div>
         <input type="file" id="photoFile" accept="image/*" style="display:none;" />
-        <p class="hint" id="photoStatus">A face or a bold, high-contrast subject works best.</p>
+        <p class="hint" id="photoStatus">A portrait works best. Bold, high-contrast subjects also work well.</p>
 
         <div id="photoProps" style="display:none;">
+          <div class="field" style="margin-top:10px;">
+            <label>Kind of image</label>
+            <div class="segmented" id="photoModeSeg">
+              <button data-photomode="portrait" class="active">Portraits</button>
+              <button data-photomode="photo">General</button>
+            </div>
+            <p class="hint" id="faceStatus"></p>
+            <p class="hint">Portraits finds the face, frames the can on it and uses a
+              much finer dot pitch — that combination is what makes a face readable
+              from across a room. General is the all-purpose pipeline for everything
+              else.</p>
+          </div>
+
+          <div id="portraitProps">
+            <div class="row2" style="margin-top:12px;">
+              <div class="field">
+                <label>Head size <span class="val" id="portraitHeadVal"></span></label>
+                <input type="range" id="portraitHead" min="0.45" max="0.98" step="0.01" />
+              </div>
+              <div class="field">
+                <label>Face detail <span class="val" id="portraitBoostVal"></span></label>
+                <input type="range" id="portraitBoost" min="0" max="2" step="0.05" />
+              </div>
+            </div>
+            <p class="hint">Head size is the strongest control here — a bigger face on the
+              can is what makes it recognisable from across a room. Face detail sharpens
+              the eye/nose/mouth scale specifically; past about 1.2 it starts to look
+              harsh.</p>
+
+            <div class="row2">
+              <div class="field">
+                <label>Brightness <span class="val" id="portraitBrightVal"></span></label>
+                <input type="range" id="portraitBright" min="-1" max="1" step="0.02" />
+              </div>
+              <div class="field">
+                <label>Contrast <span class="val" id="portraitContrastVal"></span></label>
+                <input type="range" id="portraitContrast" min="-1" max="1" step="0.02" />
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label>Darken the edges <span class="val" id="portraitVigVal"></span></label>
+                <input type="range" id="portraitVig" min="0" max="1" step="0.05" />
+              </div>
+              <div class="field">
+                <label>Tone steps <span class="val" id="portraitLevelsVal"></span></label>
+                <input type="range" id="portraitLevels" min="0" max="12" step="1" />
+              </div>
+            </div>
+            <div class="row2" style="margin-top:10px;">
+              <button class="secondary" id="portraitRecentre">Re-centre on face</button>
+              <button class="secondary" id="portraitReset">Reset look</button>
+            </div>
+          </div>
+
           <div class="field" style="margin-top:10px;">
             <label>How it fills the can</label>
             <div class="segmented" id="photoFitSeg">
@@ -148,11 +203,25 @@
           <div class="row2">
             <div class="field">
               <label>Move sideways <span class="val" id="photoOffsetXVal"></span></label>
-              <input type="range" id="photoOffsetX" min="-0.5" max="0.5" step="0.01" />
+              <input type="range" id="photoOffsetX" min="-2" max="2" step="0.01" />
             </div>
             <div class="field">
               <label>Move up/down <span class="val" id="photoOffsetYVal"></span></label>
-              <input type="range" id="photoOffsetY" min="-0.5" max="0.5" step="0.01" />
+              <input type="range" id="photoOffsetY" min="-2" max="2" step="0.01" />
+            </div>
+          </div>
+
+          <!-- The whole-picture tone pipeline. Hidden in face mode, where
+               portrait.ts drives tone instead and these controls do nothing. -->
+          <div id="photoToneGroup">
+          <div class="row2" style="margin-top:12px;">
+            <div class="field">
+              <label>Brightness <span class="val" id="photoBrightnessVal"></span></label>
+              <input type="range" id="photoBrightness" min="-1" max="1" step="0.02" />
+            </div>
+            <div class="field">
+              <label>Contrast <span class="val" id="photoContrastVal"></span></label>
+              <input type="range" id="photoContrast" min="-1" max="1" step="0.02" />
             </div>
           </div>
 
@@ -203,6 +272,16 @@
                 <input type="range" id="photoWhitePoint" min="0.5" max="1" step="0.01" />
               </div>
             </div>
+            <div class="field">
+              <label>Contrast halo</label>
+              <div class="segmented" id="photoEdgeAwareSeg">
+                <button data-edgeaware="0" class="active">Keep (moat)</button>
+                <button data-edgeaware="1">Suppress</button>
+              </div>
+              <p class="hint">Local contrast darkens the background around a bright
+                subject. That halo usually helps it stand out. Suppress it if bright
+                areas are eating the detail around them.</p>
+            </div>
             <div class="row2">
               <div class="field">
                 <label>Contrast radius <span class="val" id="photoLocalContrastRadiusVal"></span></label>
@@ -221,6 +300,7 @@
               blank. Edge boost traces outlines, which survive the dot grid better
               than fine shading does.</p>
           </details>
+          </div>
         </div>
       </details>
 
@@ -294,6 +374,12 @@
         <summary>Quality <span class="tag" id="qualityLabel"></span></summary>
         <input type="range" id="quality" min="0" max="3" step="1" />
         <div class="ticks"><span>Draft</span><span>Standard</span><span>Fine</span><span>Ultra</span></div>
+      </details>
+
+      <details class="ctrl" open>
+        <summary>Dot pattern <span class="tag" id="generatorLabel"></span></summary>
+        <div class="segmented" id="generatorSeg"></div>
+        <p class="hint" id="generatorHint"></p>
       </details>
 
       <details class="ctrl" open>

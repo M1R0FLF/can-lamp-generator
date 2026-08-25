@@ -15,6 +15,7 @@ import {
   PhotoPlacement,
   PhotoSource,
   PhotoFit,
+  solveAutoPunch,
   SeamMode,
   DEFAULT_PHOTO_PARAMS,
   DEFAULT_PLACEMENT,
@@ -23,6 +24,23 @@ import {
   placementFor,
 } from './engine/photo';
 import { PRESETS, getPreset } from './engine/presets';
+import {
+  PortraitParams,
+  DEFAULT_PORTRAIT_PARAMS,
+  DEFAULT_HEAD_HEIGHT_FRAC,
+  PORTRAIT_PLACEMENT,
+  PORTRAIT_STIPPLE,
+  PORTRAIT_QUALITY,
+  faceWidthFor,
+} from './engine/portrait';
+import {
+  FaceBox,
+  findFace,
+  framingFor,
+  loadFaceFinder,
+  faceWidthOnCan,
+} from './engine/faceFind';
+import { GENERATORS, DEFAULT_GENERATOR_ID, getGenerator } from './engine/generators';
 import { Hole, StippleMode, StippleParams, DEFAULT_STIPPLE } from './engine/stipple';
 import { renderGlow } from './engine/glow';
 import { createCan3D, CAN_STYLES, Can3D } from './render3d';
@@ -80,6 +98,8 @@ interface State {
   presetId: string;
   qualityIndex: number;
   holeMode: HoleMode;
+  /** id from GENERATORS: which grid+dither pair the sampler runs */
+  generatorId: string;
   fixedDiameter: number;
   /** stipple overrides the user has explicitly touched */
   overrides: Partial<StippleParams>;
@@ -109,6 +129,18 @@ interface State {
   photoName: string;
   photoPlacement: PhotoPlacement;
   photoParams: PhotoParams;
+  /**
+   * Which pipeline the loaded image goes through. A face and a picture want
+   * genuinely different processing (see portrait.ts), so this is a real fork
+   * rather than a preset of the same one. Set from detection on load, then the
+   * user's to override.
+   */
+  photoMode: 'portrait' | 'photo';
+  portraitParams: PortraitParams;
+  /** last detection, in source-image pixels. null = none found. */
+  faceBox: FaceBox | null;
+  /** head height as a fraction of wall height, the framing's main control */
+  headHeightFrac: number;
 }
 
 const state: State = {
@@ -118,6 +150,7 @@ const state: State = {
   presetId: PRESETS[0].id,
   qualityIndex: DEFAULT_QUALITY_INDEX,
   holeMode: 'varying',
+  generatorId: DEFAULT_GENERATOR_ID,
   fixedDiameter: 0.35,
   overrides: {},
   minWebTarget: DEFAULT_MIN_WEB_TARGET,
@@ -146,6 +179,10 @@ const state: State = {
   photoName: '',
   photoPlacement: { ...DEFAULT_PLACEMENT },
   photoParams: { ...DEFAULT_PHOTO_PARAMS },
+  photoMode: 'portrait',
+  portraitParams: { ...DEFAULT_PORTRAIT_PARAMS },
+  faceBox: null,
+  headHeightFrac: DEFAULT_HEAD_HEIGHT_FRAC,
 };
 
 let result: GenerateResult | null = null;
@@ -209,6 +246,74 @@ const presetSelect = el<HTMLSelectElement>('preset');
   presetSelect.value = state.presetId;
 }
 
+// ---------- dot pattern picker ----------
+// Built from GENERATORS rather than written into index.html, so the catalogue
+// and its measured justifications stay in one file.
+// Set once the user picks a pattern by hand, so loading a photo stops
+// overriding them. Without it, choosing Classic for a photo and then loading a
+// different crop would silently snap back to Detail.
+let generatorTouched = false;
+
+// Set once the user moves the Punch slider, so auto-Punch stops overriding a
+// choice they made with the render in front of them.
+let punchTouched = false;
+
+// Set once the user picks face-vs-picture by hand, so detection on the next
+// upload stops overriding them.
+let photoModeTouched = false;
+
+function buildGeneratorPicker() {
+  const seg = el('generatorSeg');
+  seg.innerHTML = '';
+  for (const g of GENERATORS) {
+    const b = document.createElement('button');
+    b.dataset.gen = g.id;
+    b.textContent = g.name;
+    b.classList.toggle('active', g.id === state.generatorId);
+    seg.appendChild(b);
+  }
+}
+
+/**
+ * Portrait params with `faceWidthMm` filled in from the live geometry.
+ *
+ * Kept out of `state.portraitParams` deliberately: the face's width ON THE CAN
+ * is derived from the detection, the placement and the can's own size, so
+ * storing it would mean three ways to get it stale (change the diameter, drag
+ * zoom, load a new photo). The tone stage needs it to set the identity band's
+ * scale, so it is computed at use.
+ *
+ * With no detection it falls back to estimating from the placement, which is
+ * roughly right for a portrait-shaped photo and the reason `faceWidthFor`
+ * still exists.
+ */
+function portraitParamsForCan(can: CanSpec): PortraitParams {
+  const ctx = photoFieldCtx(can);
+  const img = state.photoImage;
+  const faceWidthMm =
+    state.faceBox && img
+      ? faceWidthOnCan(state.faceBox, state.photoPlacement, img.width, img.height, ctx.W, ctx.H, can.ppm)
+      : faceWidthFor(state.photoPlacement, ctx.W, ctx.H);
+  return { ...state.portraitParams, faceWidthMm };
+}
+
+/**
+ * Re-solve the crop from the current detection and head-size setting.
+ *
+ * Separate from loading so that changing the head-size slider, or the can's
+ * dimensions, re-frames without re-running detection.
+ */
+function reframeOnFace(): boolean {
+  const img = state.photoImage;
+  if (!img || !state.faceBox) return false;
+  const can: CanSpec = { diameterMm: state.diameterMm, heightMm: state.heightMm, ppm: PPM_FULL };
+  const ctx = photoFieldCtx(can);
+  state.photoPlacement = framingFor(
+    state.faceBox, img.width, img.height, ctx.W, ctx.H, can.ppm, state.headHeightFrac
+  );
+  return true;
+}
+
 // ---------- resolve the stipple params in play ----------
 function effectiveStipple(): StippleParams {
   // Gated on an image actually being loaded, not just on the tab being open:
@@ -216,17 +321,35 @@ function effectiveStipple(): StippleParams {
   // stipple params have to fall back in step or the preview would be sampled
   // with photo tuning (knee 0.95) while showing preset artwork.
   const designPart =
-    state.sourceKind === 'photo' && state.photoImage ? PHOTO_STIPPLE :
+    state.sourceKind === 'photo' && state.photoImage
+      ? (state.photoMode === 'portrait' ? PORTRAIT_STIPPLE : PHOTO_STIPPLE) :
     state.sourceKind === 'custom' ? CUSTOM_STIPPLE :
     getPreset(state.presetId).stipple;
-  const q = QUALITY_PRESETS[state.qualityIndex];
-  const qualityPart = q
-    ? { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter }
-    : {};
+  // The face pipeline has its own quality ladder — see PORTRAIT_QUALITY. It has
+  // to be consulted HERE rather than layered under the design tuple, because
+  // the quality part is applied after it and would otherwise overwrite the
+  // portrait pitch with a preset one, throwing away the pipeline's single most
+  // important variable.
+  const portraitMode =
+    state.sourceKind === 'photo' && !!state.photoImage && state.photoMode === 'portrait';
+  let qualityPart: Partial<StippleParams> = {};
+  if (portraitMode) {
+    const q = PORTRAIT_QUALITY[Math.min(PORTRAIT_QUALITY.length - 1, state.qualityIndex)];
+    qualityPart = { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter, rowShift: q.rowShift };
+  } else {
+    const q = QUALITY_PRESETS[state.qualityIndex];
+    if (q) qualityPart = { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter };
+  }
+  // The generator sits between the design's own tuning and the user's explicit
+  // Advanced overrides: it is a deliberate choice, so it beats a preset's
+  // default, but it only carries `grid`/`dither` and must not shadow anything
+  // the user typed by hand.
+  const gen = getGenerator(state.generatorId);
   const base: StippleParams = {
     ...DEFAULT_STIPPLE,
     ...designPart,
     ...qualityPart,
+    dither: gen.dither,
     ...state.overrides,
   };
   if (state.holeMode === 'fixed') {
@@ -257,7 +380,10 @@ function regenerate(ppm: number) {
   const photoSrc = state.sourceKind === 'photo' ? photoSourceFor(can) : null;
   const source: SourceSpec =
     state.sourceKind === 'custom' ? { kind: 'custom', shapes: state.shapes }
-    : photoSrc ? { kind: 'photo', source: photoSrc, params: state.photoParams }
+    : photoSrc
+      ? state.photoMode === 'portrait'
+        ? { kind: 'portrait', source: photoSrc, params: portraitParamsForCan(can) }
+        : { kind: 'photo', source: photoSrc, params: state.photoParams }
     : { kind: 'preset', presetId: state.presetId };
   const annotation: AnnotationSpec | undefined = state.annotationText.trim()
     ? {
@@ -687,6 +813,25 @@ function syncInputs() {
   set('knee', s.knee.toFixed(2));
   set('stippleGamma', s.gamma.toFixed(2));
   set('toneMode', s.mode);
+  {
+    const gen = getGenerator(state.generatorId);
+    setText('generatorLabel', gen.name);
+    // AM carries tone purely in hole size, so there is no density decision for
+    // a dither to make and all three patterns come out identical. That is
+    // correct, but it looks broken — and the default preset (Mango Salvaje) is
+    // the one AM design in the library, so it is the first thing a new user
+    // clicks. Say so rather than letting the buttons appear dead.
+    setText(
+      'generatorHint',
+      s.mode === 'am'
+        ? `${gen.hint} Note: this design sets tone by hole size alone (Advanced → Tone mode: AM), ` +
+          'so the dot pattern makes no difference here. Switch Tone mode to Hybrid to use it.'
+        : gen.hint
+    );
+    for (const b of el('generatorSeg').querySelectorAll('button')) {
+      b.classList.toggle('active', (b as HTMLElement).dataset.gen === state.generatorId);
+    }
+  }
   set('minWebTarget', state.minWebTarget.toFixed(2));
   set('laserSpeed', String(state.laserSpeed));
   set('laserPasses', String(state.laserPasses));
@@ -752,6 +897,42 @@ function syncInputs() {
   set('photoOffsetY', String(pl.offsetY));
   set('photoPosterize', String(pp.posterize));
   set('photoGamma', String(pp.gamma));
+  {
+    const q = state.portraitParams;
+    set('portraitHead', String(state.headHeightFrac));
+    set('portraitBoost', String(q.identityBoost));
+    set('portraitBright', String(q.brightness));
+    set('portraitContrast', String(q.contrast));
+    set('portraitVig', String(q.vignette));
+    set('portraitLevels', String(q.levels));
+    setText('portraitHeadVal', `${Math.round(state.headHeightFrac * 100)}% of wall`);
+    setText('portraitBoostVal', q.identityBoost.toFixed(2));
+    const sg = (v: number) => (v === 0 ? '0' : `${v > 0 ? '+' : ''}${Math.round(v * 100)}`);
+    setText('portraitBrightVal', sg(q.brightness));
+    setText('portraitContrastVal', sg(q.contrast));
+    setText('portraitVigVal', q.vignette.toFixed(2));
+    setText('portraitLevelsVal', q.levels >= 2 ? `${Math.round(q.levels)}` : 'smooth');
+    for (const b of document.querySelectorAll<HTMLElement>('#photoModeSeg button')) {
+      b.classList.toggle('active', b.dataset.photomode === state.photoMode);
+    }
+    setText('photoKindLabel', state.photoImage ? (state.photoMode === 'portrait' ? 'Portraits' : 'General') : '');
+    // the two pipelines have disjoint controls; showing both would imply the
+    // inactive set is doing something
+    const isPortrait = state.photoMode === 'portrait';
+    const pProps = document.getElementById('portraitProps');
+    if (pProps) pProps.style.display = isPortrait ? 'block' : 'none';
+    for (const id of ['photoToneGroup']) {
+      const n = document.getElementById(id);
+      if (n) n.style.display = isPortrait ? 'none' : 'block';
+    }
+    const rec = document.getElementById('portraitRecentre') as HTMLButtonElement | null;
+    if (rec) {
+      rec.disabled = !state.faceBox;
+      rec.title = state.faceBox ? '' : 'No face was detected in this photo';
+    }
+  }
+  set('photoBrightness', String(pp.brightness));
+  set('photoContrast', String(pp.contrast));
   set('photoLocalContrast', String(pp.localContrast));
   set('photoLocalContrastRadius', String(pp.localContrastRadiusMm));
   set('photoVignette', String(pp.vignette));
@@ -765,6 +946,9 @@ function syncInputs() {
   setText('photoOffsetYVal', `${pl.offsetY >= 0 ? '+' : ''}${Math.round(pl.offsetY * 100)}%`);
   setText('photoPosterizeVal', pp.posterize >= 2 ? `${Math.round(pp.posterize)} steps` : 'off');
   setText('photoGammaVal', pp.gamma.toFixed(2));
+  const signed = (v: number) => `${v > 0 ? '+' : ''}${Math.round(v * 100)}`;
+  setText('photoBrightnessVal', pp.brightness === 0 ? '0' : signed(pp.brightness));
+  setText('photoContrastVal', pp.contrast === 0 ? '0' : signed(pp.contrast));
   setText('photoLocalContrastVal', pp.localContrast.toFixed(2));
   setText('photoLocalContrastRadiusVal', `${pp.localContrastRadiusMm.toFixed(0)} mm`);
   setText('photoVignetteVal', pp.vignette.toFixed(2));
@@ -777,6 +961,9 @@ function syncInputs() {
   }
   for (const b of document.querySelectorAll<HTMLElement>('#photoSeamSeg button')) {
     b.classList.toggle('active', b.dataset.seam === pl.seam);
+  }
+  for (const b of document.querySelectorAll<HTMLElement>('#photoEdgeAwareSeg button')) {
+    b.classList.toggle('active', (b.dataset.edgeaware === '1') === pp.localContrastEdgeAware);
   }
   for (const b of document.querySelectorAll<HTMLElement>('#photoAutoLevelsSeg button')) {
     b.classList.toggle('active', (b.dataset.auto === '1') === pp.autoLevels);
@@ -1035,6 +1222,56 @@ async function loadPhotoFile(file: File | undefined | null) {
           : 'Upright, so it sits on the front with the back left dark.')
     );
     el('photoProps').style.display = 'block';
+
+    // ---- is it a face? ----
+    //
+    // Detection decides which pipeline the image goes through, so it runs on
+    // load rather than waiting for the user to pick. The cascade is 234KB and
+    // fetched on first use, so a session that only ever renders presets never
+    // downloads it.
+    //
+    // Every failure here is non-fatal by design: a blocked fetch, an offline
+    // reload or a photo with no findable face must all still give the user a
+    // working picture, so each falls through to the 'photo' pipeline with its
+    // own placement rather than throwing.
+    state.faceBox = null;
+    let faceMsg = '';
+    try {
+      await loadFaceFinder();
+      state.faceBox = findFace(bmp);
+      if (state.faceBox) {
+        if (!photoModeTouched) state.photoMode = 'portrait';
+        state.headHeightFrac = DEFAULT_HEAD_HEIGHT_FRAC;
+        reframeOnFace();
+        faceMsg = `Face found — framed on it, ${Math.round(state.faceBox.w)}px wide in your image.`;
+      } else {
+        if (!photoModeTouched) state.photoMode = 'photo';
+        faceMsg = 'No face found — using the General pipeline. Switch to Portraits to force it.';
+      }
+    } catch {
+      if (!photoModeTouched) state.photoMode = 'photo';
+      faceMsg = "Couldn't load the face detector — using the General pipeline.";
+    }
+    setText('faceStatus', faceMsg);
+
+    // A photograph wants the Detail pattern, so switch to it on load rather
+    // than leaving the user to discover it. Error diffusion holds ~13% more
+    // contrast at ~4mm features (measured; see generators.ts) and 4mm is the
+    // size of an eye on a can — Classic renders the same face visibly softer.
+    // Only moved when the user has not picked a pattern for themselves, so an
+    // explicit choice survives loading a second image.
+    if (!generatorTouched) state.generatorId = 'detail';
+    // Punch (gamma) trades face brightness against face contrast, and the right
+    // value is a property of the photograph rather than a constant — measured,
+    // two portraits wanted values nearly a factor of two apart. Solve it from
+    // the image instead of shipping one compromise. Deferred to the user the
+    // moment they touch the slider.
+    if (!punchTouched && state.photoMode === 'photo') {
+      state.photoParams.gamma = solveAutoPunch(
+        bmp, Math.PI * state.diameterMm, state.heightMm,
+        state.photoPlacement, state.photoParams, effectiveStipple().pitchMm
+      );
+    }
     // Loading an image IS choosing the photo source. Without this, dropping a
     // file while the Preset tab is active leaves the preview showing the
     // preset — the upload appears to have silently done nothing.
@@ -1097,8 +1334,15 @@ photoPlace('photoCoverage', 'coverage');
 photoPlace('photoOffsetX', 'offsetX');
 photoPlace('photoOffsetY', 'offsetY');
 
+photoTone('photoBrightness', 'brightness');
+photoTone('photoContrast', 'contrast');
 photoTone('photoPosterize', 'posterize');
 photoTone('photoGamma', 'gamma');
+// Touching Punch hands control back to the user for the rest of the session:
+// auto-Punch is a starting point, not a policy.
+el('photoGamma').addEventListener('input', () => {
+  punchTouched = true;
+});
 photoTone('photoLocalContrast', 'localContrast');
 photoTone('photoLocalContrastRadius', 'localContrastRadiusMm');
 photoTone('photoVignette', 'vignette');
@@ -1131,6 +1375,73 @@ el('photoAutoLevelsSeg').addEventListener('click', (e) => {
   draftThenFull();
 });
 
+el('photoEdgeAwareSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.photoParams.localContrastEdgeAware = btn.dataset.edgeaware === '1';
+  syncInputs();
+  draftThenFull();
+});
+
+// ---------- portrait (face) controls ----------
+el('photoModeSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.photoMode = btn.dataset.photomode as 'portrait' | 'photo';
+  photoModeTouched = true;
+  // switching INTO face mode should re-frame on the face, since the photo
+  // pipeline's placement is a whole-image composition and the face pipeline's
+  // is a crop; leaving the old one would show a face mode that looks broken
+  if (state.photoMode === 'portrait') reframeOnFace();
+  else if (state.photoImage) {
+    state.photoPlacement = placementFor(
+      state.photoImage.width, state.photoImage.height, Math.PI * state.diameterMm, state.heightMm
+    );
+  }
+  photoCache = null;
+  syncInputs();
+  draftThenFull();
+});
+
+// Head size re-solves the crop, so it goes through reframeOnFace() rather than
+// straight into the params.
+el('portraitHead').addEventListener('input', () => {
+  state.headHeightFrac = Number(el<HTMLInputElement>('portraitHead').value);
+  reframeOnFace();
+  photoCache = null;
+  syncInputs();
+  draftThenFull();
+});
+
+function portraitTone<K extends keyof PortraitParams>(id: string, key: K) {
+  el(id).addEventListener('input', () => {
+    state.portraitParams[key] = Number(el<HTMLInputElement>(id).value) as PortraitParams[K];
+    syncInputs();
+    draftThenFull();
+  });
+}
+portraitTone('portraitBoost', 'identityBoost');
+portraitTone('portraitBright', 'brightness');
+portraitTone('portraitContrast', 'contrast');
+portraitTone('portraitVig', 'vignette');
+portraitTone('portraitLevels', 'levels');
+
+el('portraitRecentre').addEventListener('click', () => {
+  if (!reframeOnFace()) return;
+  photoCache = null;
+  syncInputs();
+  draftThenFull();
+});
+
+el('portraitReset').addEventListener('click', () => {
+  state.portraitParams = { ...DEFAULT_PORTRAIT_PARAMS };
+  state.headHeightFrac = DEFAULT_HEAD_HEIGHT_FRAC;
+  reframeOnFace();
+  photoCache = null;
+  syncInputs();
+  draftThenFull();
+});
+
 el('photoInvert').addEventListener('click', () => {
   state.photoParams.invert = !state.photoParams.invert;
   syncInputs();
@@ -1141,6 +1452,26 @@ el('photoReset').addEventListener('click', () => {
   // Look only — deliberately keeps placement, so resetting the tone controls
   // doesn't also throw away the framing the user just spent time on.
   state.photoParams = { ...DEFAULT_PHOTO_PARAMS };
+  // "Reset" means back to the default FOR THIS IMAGE, and auto-Punch is part of
+  // that default — handing back the generic 0.7 would reset to something the
+  // image was never going to want.
+  punchTouched = false;
+  if (state.photoImage) {
+    state.photoParams.gamma = solveAutoPunch(
+      state.photoImage, Math.PI * state.diameterMm, state.heightMm,
+      state.photoPlacement, state.photoParams, effectiveStipple().pitchMm
+    );
+  }
+  syncInputs();
+  draftThenFull();
+});
+
+// dot pattern
+el('generatorSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.generatorId = btn.dataset.gen!;
+  generatorTouched = true;
   syncInputs();
   draftThenFull();
 });
@@ -1698,6 +2029,7 @@ el<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
 
 // ---------- init ----------
 injectAnalytics(); // no-ops locally; only sends events once served from Vercel
+buildGeneratorPicker();
 applyViewMode();
 applyAnnotationProps();
 syncInputs();

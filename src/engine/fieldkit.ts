@@ -279,6 +279,56 @@ export function boxBlur(
 }
 
 /**
+ * Edge-aware smoothing (He, Sun & Tang's guided filter, with the field as its
+ * own guide), for use as the reference in a local-contrast pass.
+ *
+ * Why not just boxBlur: unsharp masking against a BLURRED reference haloes.
+ * The reference bleeds the bright side of an edge into the dark side, so the
+ * difference `f - reference` overshoots on one side and undershoots on the
+ * other, and a bright subject picks up a dark rim and a dark background picks
+ * up a bright one. At the ~30mm radius photo.ts uses for subject/background
+ * normalisation the halo is 30mm wide too, which is larger than rule 3's whole
+ * legible-feature floor.
+ *
+ * A guided filter smooths WITHIN regions but not ACROSS edges: per window it
+ * fits a linear model of the output on the guide, and `a = var/(var+eps)`
+ * makes that fit approach the identity wherever the window straddles real
+ * structure (high variance) and approach the plain mean where it does not.
+ * Cost is four box blurs instead of one, all O(n) running sums.
+ *
+ * `eps` is in units of tone VARIANCE, so it is comparable across images:
+ * 0.01 means a window whose tone spread is more than ~0.1 counts as an edge.
+ */
+export function guidedSelf(
+  src: Float32Array,
+  Wp: number,
+  Hp: number,
+  radius: number,
+  eps: number
+): Float32Array {
+  const n = Wp * Hp;
+  const meanI = boxBlur(src, Wp, Hp, radius, radius);
+  const sq = new Float32Array(n);
+  for (let i = 0; i < n; i++) sq[i] = src[i] * src[i];
+  const meanII = boxBlur(sq, Wp, Hp, radius, radius);
+  // reuse sq for `a` and meanII for `b`; both are dead after this loop, and at
+  // 1.9M floats a field is 7.4MB, so not allocating two more matters
+  const a = sq;
+  const b = meanII;
+  for (let i = 0; i < n; i++) {
+    const varI = Math.max(0, meanII[i] - meanI[i] * meanI[i]);
+    const ai = varI / (varI + eps);
+    a[i] = ai;
+    b[i] = meanI[i] * (1 - ai);
+  }
+  const meanA = boxBlur(a, Wp, Hp, radius, radius);
+  const meanB = boxBlur(b, Wp, Hp, radius, radius);
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = meanA[i] * src[i] + meanB[i];
+  return out;
+}
+
+/**
  * Rule 6 — band-limit before sampling. Anything finer than the hole grid
  * becomes aliasing, not detail, so blur to roughly the grid cell before the
  * stipple samples it. (Sharpening at this scale actively hurts.)

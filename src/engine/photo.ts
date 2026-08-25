@@ -10,7 +10,7 @@
 //
 // A photo also does not wrap. `seam` handles that explicitly rather than
 // leaving a visible discontinuity at x=0.
-import { FieldCtx, boxBlur, clamp01 } from './fieldkit';
+import { FieldCtx, boxBlur, clamp01, guidedSelf } from './fieldkit';
 
 /**
  * sRGB transfer-function tables, so luminance is computed from LIGHT rather
@@ -69,6 +69,19 @@ export interface PhotoParams {
   blackPoint: number;
   whitePoint: number;
   gamma: number;
+  /**
+   * Overall gain, -1..+1, 0 = neutral. A MULTIPLIER rather than an offset:
+   * adding a constant would lift pure black off zero, and rule 5 is explicit
+   * that real blacks (no holes at all) are what make an image read. A gain
+   * leaves black at black and opens up everything above it.
+   */
+  brightness: number;
+  /**
+   * Contrast around mid-tone, -1..+1, 0 = neutral. Pivots at 0.5 in perceptual
+   * space, i.e. the same space posterize quantises in, so the two compose the
+   * way a user expects.
+   */
+  contrast: number;
   /** large-radius unsharp = local contrast / "clarity". 0 = off */
   localContrast: number;
   /**
@@ -84,6 +97,38 @@ export interface PhotoParams {
    * which is the actual goal, and leaves 16mm features intact.
    */
   localContrastRadiusMm: number;
+  /**
+   * Use an edge-aware reference for the local-contrast pass (guidedSelf() in
+   * fieldkit.ts) instead of a plain blur.
+   *
+   * OFF by default, and that default is the measured answer rather than
+   * caution. The plain blur unquestionably haloes — against a 40mm bright
+   * subject on textured dark ground it drags the ground 7.3% darker where it
+   * meets the subject, and against a hard-edged one it clips 30mm of
+   * background to pure black. The guided reference cuts that to 1.5%.
+   *
+   * But the halo is doing CLAUDE.md rule 4's job. Rule 4 calls a dark moat
+   * around a bright shape "the single biggest legibility lever", and an
+   * unsharp mask at a 30mm radius produces one for free. Rendered side by side
+   * the haloed portrait is brighter and its eyes, nose shadow and mouth all
+   * read more clearly; the halo-free one is flatter and reads worse. Nor can
+   * it be dialled back in: a self-guided filter only amplifies variance INSIDE
+   * a region, and smooth skin has almost none, so pushing `localContrast` from
+   * 0.45 to 0.95 moved open area from 1.11% to 1.13% and changed nothing
+   * visible.
+   *
+   * So this is not an upgrade, it is an escape hatch — worth having for images
+   * where the halo is destructive rather than helpful (a high-key photo, or
+   * one with several bright regions whose 30mm halos would eat all the
+   * background between them), and worth leaving off everywhere else.
+   */
+  localContrastEdgeAware: boolean;
+  /**
+   * Edge threshold for that filter, in units of tone variance: a window whose
+   * tone spread exceeds ~sqrt(eps) is treated as structure to preserve rather
+   * than texture to average away.
+   */
+  localContrastEdgeEps: number;
   /** quantise to N tone steps. 0 or 1 = off */
   posterize: number;
   /** add Sobel gradient magnitude so structure survives the low sample count */
@@ -170,53 +215,207 @@ export const PHOTO_STIPPLE = {
 };
 
 /**
- * Lithophane-informed correction, quickly borrowed from a different craft
- * that solved a related problem. A lithophane maps luminance to material
- * THICKNESS, and thin/thick both transmit light non-linearly (Beer-Lambert);
- * our case is simpler because a hole is fully open or fully closed, so open-
- * area fraction already equals transmitted light fraction directly (linear).
- * But the photo's pixel values are NOT linear — a digital photo is
- * gamma-encoded (~2.2) so that equal steps LOOK equally spaced to a human
- * eye. Feeding that encoded value straight in as "fraction open" over-
- * brightens midtones: a nominal 50%-gray pixel wants to be perceived at
- * ~50% brightness, which requires physical transmission of roughly
- * 0.5^2.2 =~ 0.22, not 0.5.
+ * Tone defaults for photographs.
  *
- * So the target end-to-end exponent from perceptual tone to open area is
- * ~2.2 — but `gamma` is NOT the only exponent in that chain. The sampler
- * contributes one too, and it is not 1. In HYBRID mode two effects multiply:
- * density rises as f/knee AND hole area rises as g^stippleGamma. Measured on
- * constant fields with PHOTO_STIPPLE (knee 0.95, thresh 0.05, gamma 0.5), open
- * area goes 0.10 -> 0.044, 0.50 -> 0.386, 0.90 -> 0.901: an effective exponent
- * of about 1.37. (The presets' low knee of 0.42 measures ~0.50 instead, which
- * is why this constant cannot simply be shared with them.)
+ * ---------------------------------------------------------------------------
+ * `gamma`: open area tracks PERCEPTUAL tone, not display luminance
+ * ---------------------------------------------------------------------------
+ * A hole is fully open or fully closed, so open-area fraction equals
+ * transmitted-light fraction directly. The obvious move from there is to treat
+ * the can as a display: a digital photo is gamma-encoded (~2.2) so equal steps
+ * LOOK equally spaced, therefore aim for an end-to-end exponent of 2.2 and a
+ * nominal 50% grey transmits 0.5^2.2 =~ 0.22.
  *
- * 1.9 x 1.37 =~ 2.6, well past the 2.2 target — midtones came out roughly a
- * quarter too dark. 2.2 / 1.37 =~ 1.6, so that is the default. Still
- * user-tunable, since posterize and local contrast interact with it.
+ * That was the reasoning behind the old default of 1.6, and the arithmetic was
+ * right — the sampler contributes its own exponent, measured at 1.373 in
+ * HYBRID mode with PHOTO_STIPPLE, and 1.6 x 1.373 = 2.197 lands within 0.15%
+ * of 2.2 (tools/measure/response.ts).
  *
- * The principled fix, once there's appetite for it, is to stop guessing at
- * the sampler's exponent and measure it: run stipple() over ~33 constant
- * fields, build the open-area response curve, and invert it as a lookup —
- * a printer linearisation curve. That decouples tone from sampler tuning
- * permanently, so changing `knee` would alter the grain without moving the
- * tone curve at all.
+ * The TARGET was wrong. A monitor can put out a real white; this can cannot.
+ * Maximum open area at the Standard tuple is 11.67%, so the whole output range
+ * is one dim eighth of the wall, and squaring it throws most of that away.
+ * Measured on two real portraits shot against bright backgrounds, the face
+ * came out at 1.29% open against a 3.15% background — the SUBJECT rendered
+ * 2.4x darker than its surroundings, which is rule 3b exactly inverted, and
+ * reported (accurately) as "both faces are too dark".
+ *
+ * So the target is open area proportional to perceptual tone, i.e. an
+ * end-to-end exponent of ~1.0, which needs 1/1.373 = 0.73. At 0.7 the same
+ * face measures 3.52% against a 3.41% background — a subject slightly
+ * brighter than its surroundings instead of a hole in them.
+ *
+ * The synthetic portrait used to develop this pipeline hid it: it was built
+ * dark-background and light-subject, the one polarity where a compressive
+ * curve does no visible harm.
+ *
+ * ---------------------------------------------------------------------------
+ * `vignette`: 0.7, because it is subject dominance, not decoration
+ * ---------------------------------------------------------------------------
+ * The falloff darkens toward the frame, and on a portrait the frame is exactly
+ * where the background lives. It is therefore the one control that suppresses
+ * background without touching the subject, which is rule 3b's "give the hero
+ * genuinely dark breathing room". Measured in the right direction: dropping it
+ * from 0.55 to 0.35 raised background open area from 3.64% to 4.51% with the
+ * face unchanged. Raised to 0.7 for the same reason, in reverse.
+ *
+ * `invert` stays a manual button. Auto-detecting bright-background portraits
+ * and flipping them was tried, worked exactly as designed, and looked worse:
+ * inverting a face makes hair bright and skin dark, i.e. a photographic
+ * negative, which reads as eerie rather than as a portrait. The real problem
+ * those images had was the gamma above, not their polarity.
  */
 export const DEFAULT_PHOTO_PARAMS: PhotoParams = {
   invert: false,
   autoLevels: true,
   blackPoint: 0.04,
   whitePoint: 0.96,
-  gamma: 1.6,
+  gamma: 0.7,
+  brightness: 0,
+  contrast: 0,
   localContrast: 0.45,
   localContrastRadiusMm: 30,
+  localContrastEdgeAware: false,
+  localContrastEdgeEps: 0.01,
   posterize: 6,
   // kept low by default: edge boost also amplifies background grain, which
   // shows up as stray specks around the subject
   edgeBoost: 0.1,
-  vignette: 0.55,
+  vignette: 0.7,
   ambient: 0.0,
 };
+
+/**
+ * Measurement resolution for the auto-Punch solve, in px/mm.
+ *
+ * MUST be kept in step with AUTO_PUNCH_TARGET below — the two are one
+ * calibration, not two independent knobs. Relative local contrast is
+ * resolution-dependent because a lower-resolution field carries less fine
+ * detail: the same approved setting measures 0.2064 here at 2 px/mm and 0.1959
+ * at the render's 8. Changing this constant without re-deriving the target
+ * silently biases every solve (it first shipped mismatched, and drove a
+ * portrait that wanted 0.70 down onto the 0.60 clamp).
+ */
+const PROBE_PPM = 2;
+
+/**
+ * Target for auto-Punch, in units of whole-image relative local contrast
+ * (RMS of the 4mm high-pass over the mean, across the covered area), measured
+ * at PROBE_PPM.
+ *
+ * Anchored on the ONE setting a human has explicitly approved: portrait 1 at
+ * gamma 0.7, which measures 0.2064 at this resolution. Everything else here is
+ * machinery; this number is the whole judgement, so it is the number to change
+ * if results drift.
+ *
+ * A single target transfers between images at all only because the quantity
+ * itself does. Measured on two portraits at the settings each wanted, contrast
+ * came out within 9% of each other despite one being a bespectacled face with
+ * dark hair and the other an evenly-lit studio shot, and despite the two
+ * needing gammas nearly a factor of two apart.
+ *
+ * It is measured over the WHOLE covered area rather than over the subject,
+ * because nothing in production knows where the subject is — this project
+ * cannot have a face detector (CLAUDE.md puts the halftone portrait generator
+ * out of scope precisely because it needs OpenCV). That dilution has a real
+ * cost, and it is worth being honest about its direction: an image with a large
+ * flat background reads LOW, so the solver pushes its gamma further than a
+ * subject-only measurement would. On the second portrait that lands 1.31 where
+ * a face-only match would have said ~1.1 — more contrast and less brightness
+ * than strictly necessary, which is at least the direction that image was
+ * reported as needing. No single whole-image target can reproduce a face-only
+ * match for both; that is the trade this approach makes.
+ */
+export const AUTO_PUNCH_TARGET = 0.2064;
+
+/** Bounds on the solved value, so a pathological image cannot produce a silly one. */
+const AUTO_PUNCH_MIN = 0.6;
+const AUTO_PUNCH_MAX = 1.6;
+
+/** The two gammas the solver probes. Chosen to span the useful range. */
+const PUNCH_PROBES = [0.7, 1.3];
+
+/**
+ * Relative local contrast at ~4mm scale over the covered area: RMS of the
+ * high-pass divided by the mean.
+ *
+ * Normalised by the mean deliberately. Raw RMS scales with overall brightness,
+ * so it scores any change that darkens the image as a loss of contrast even
+ * when the features have become MORE distinct — which is exactly backwards for
+ * choosing a tone curve, and it sent an earlier version of this measurement
+ * the wrong way.
+ */
+function relativeLocalContrast(
+  field: Float32Array,
+  Wp: number,
+  Hp: number,
+  cover: Float32Array,
+  ppm: number
+): number {
+  const r = Math.max(1, Math.round(4 * ppm));
+  const blur = boxBlur(field, Wp, Hp, r, r);
+  let mean = 0;
+  let rms = 0;
+  let n = 0;
+  for (let i = 0; i < field.length; i++) {
+    if (cover[i] <= 0) continue;
+    mean += field[i];
+    const d = field[i] - blur[i];
+    rms += d * d;
+    n++;
+  }
+  if (n === 0) return 0;
+  mean /= n;
+  if (mean <= 1e-6) return 0;
+  return Math.sqrt(rms / n) / mean;
+}
+
+/**
+ * Solve for the `gamma` ("Punch") that lands this image on AUTO_PUNCH_TARGET.
+ *
+ * Punch trades face brightness against face contrast, and which value is right
+ * is a property of the photograph, not a constant: a face with glasses and
+ * dark hair carries its own contrast and wants a low value, while an evenly-lit
+ * studio portrait needs nearly twice as much before its features separate from
+ * the skin. A single default cannot serve both — reported as one image being
+ * right and the other "too bright, you can't see face details".
+ *
+ * Closed loop rather than a heuristic: probe two gammas, measure what actually
+ * comes out of the real tone pipeline, and interpolate. Relative contrast is
+ * very nearly linear in gamma over this range (measured 0.190 -> 0.256 across
+ * 0.6 -> 1.5, and 0.138 -> 0.212 on the other image), so two probes are enough
+ * and a third would only confirm the straight line.
+ *
+ * Runs at PROBE_PPM (2 px/mm) instead of the render's 8, which makes the two
+ * extra field builds about 1/16 the cost each. A 4mm feature is still 8 px
+ * across there, so the measurement holds up while the solve stays a few tens
+ * of milliseconds instead of most of a second — but see PROBE_PPM: the target
+ * is calibrated to that resolution and the two must move together.
+ */
+export function solveAutoPunch(
+  img: HTMLImageElement | ImageBitmap,
+  W: number,
+  H: number,
+  place: PhotoPlacement,
+  params: PhotoParams,
+  pitchMm: number
+): number {
+  const ctx = new FieldCtx(W, H, PROBE_PPM);
+  const src = sampleImage(img, ctx, place);
+  const measured: number[] = [];
+  for (const g of PUNCH_PROBES) {
+    const built = buildPhotoField(src, ctx, { ...params, gamma: g }, pitchMm);
+    measured.push(relativeLocalContrast(built.field, ctx.Wp, ctx.Hp, src.cover, PROBE_PPM));
+  }
+  const [g0, g1] = PUNCH_PROBES;
+  const [c0, c1] = measured;
+  const slope = c1 - c0;
+  // A flat response means contrast does not respond to Punch at all (a blank
+  // or single-tone image). Nothing to solve; leave the default in place.
+  if (!isFinite(slope) || Math.abs(slope) < 1e-6) return params.gamma;
+  const solved = g0 + ((AUTO_PUNCH_TARGET - c0) / slope) * (g1 - g0);
+  if (!isFinite(solved)) return params.gamma;
+  return Math.min(AUTO_PUNCH_MAX, Math.max(AUTO_PUNCH_MIN, Math.round(solved * 100) / 100));
+}
 
 export interface PhotoSource {
   /** luminance 0..1 at field resolution */
@@ -391,9 +590,11 @@ export function buildPhotoField(
   // sharpening; fine-scale sharpening actively hurts at this pitch (rule 6). ---
   if (params.localContrast > 0) {
     const r = Math.max(2, Math.round(params.localContrastRadiusMm * ctx.PPM));
-    const blurred = boxBlur(f, Wp, Hp, r, r);
+    const reference = params.localContrastEdgeAware
+      ? guidedSelf(f, Wp, Hp, r, params.localContrastEdgeEps)
+      : boxBlur(f, Wp, Hp, r, r);
     for (let i = 0; i < n; i++) {
-      f[i] = f[i] + params.localContrast * (f[i] - blurred[i]);
+      f[i] = f[i] + params.localContrast * (f[i] - reference[i]);
     }
   }
 
@@ -406,6 +607,33 @@ export function buildPhotoField(
   const span = Math.max(1e-4, wp - bp);
   for (let i = 0; i < n; i++) {
     f[i] = Math.min(1, Math.max(0, (f[i] - bp) / span));
+  }
+
+  // --- brightness and contrast: the two plain controls.
+  //
+  // Placed after levels and before posterize on purpose. Levels normalise the
+  // image's own range first, so these two act on a predictable 0..1 signal
+  // rather than fighting whatever the histogram happened to be; and running
+  // before posterize means the quantisation steps land on the adjusted tone,
+  // so raising contrast redistributes the steps instead of leaving them where
+  // the unadjusted image put them.
+  //
+  // Contrast first, then brightness: contrast pivots about mid-grey, so
+  // applying it after a gain would pivot about the wrong point and a
+  // brightness change would silently alter the contrast response. ---
+  if (params.contrast !== 0) {
+    const k = 1 + params.contrast;
+    for (let i = 0; i < n; i++) {
+      const v = (f[i] - 0.5) * k + 0.5;
+      f[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+    }
+  }
+  if (params.brightness !== 0) {
+    const k = 1 + params.brightness;
+    for (let i = 0; i < n; i++) {
+      const v = f[i] * k;
+      f[i] = v < 0 ? 0 : v > 1 ? 1 : v;
+    }
   }
 
   // --- posterize: the "dumb it down" step. Hard tone steps read far better

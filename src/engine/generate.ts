@@ -11,6 +11,7 @@ import {
   PHOTO_STIPPLE,
 } from './photo';
 import { CustomShape, buildCustomField, CUSTOM_STIPPLE } from './customShapes';
+import { PortraitParams, buildPortraitField } from './portrait';
 
 /**
  * Presets are authored against a fixed reference height (matching the two
@@ -94,6 +95,13 @@ export interface AnnotationSpec {
 export type SourceSpec =
   | { kind: 'preset'; presetId: string }
   | { kind: 'photo'; source: PhotoSource; params: PhotoParams }
+  /**
+   * A face. Shares `sampleImage`'s resampling with 'photo' and nothing else:
+   * portrait.ts has its own tone pipeline because reproducing a photograph
+   * faithfully and making a face recognisable are different goals that want
+   * opposite things at several steps.
+   */
+  | { kind: 'portrait'; source: PhotoSource; params: PortraitParams }
   | { kind: 'custom'; shapes: CustomShape[] };
 
 export interface CropWindow {
@@ -235,6 +243,8 @@ export function generate(
   } else if (source.kind === 'custom') {
     field = buildCustomField(ctx, source.shapes);
     field = bandLimit(field, ctx.Wp, ctx.Hp, params.pitchMm * 0.6, can.ppm);
+  } else if (source.kind === 'portrait') {
+    field = buildPortraitField(source.source, ctx, source.params, params.pitchMm).field;
   } else {
     field = buildPhotoField(source.source, ctx, source.params, params.pitchMm).field;
   }

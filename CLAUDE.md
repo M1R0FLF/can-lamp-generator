@@ -109,6 +109,92 @@ Stroke the path in black at `lineWidth = 2 × moat` *before* filling it white. ~
 Without the moat, a bright shape sitting in textured background has no figure/ground
 separation. This is the single biggest legibility lever.
 
+**Corollary — a photo's local-contrast halo is a moat, so don't "fix" it.** Unsharp
+masking against a blurred reference haloes by construction: measured against a 40mm
+bright subject on textured dark ground, `photo.ts`'s 30mm local contrast drags the
+background 7.3% darker where it meets the subject (and against a *hard*-edged subject
+it clips 30mm of background to pure black). Replacing the blur with an edge-aware
+guided filter cuts that to 1.5% — and makes the result **worse**, because the halo was
+doing this rule's job for free. Rendered side by side the haloed portrait is brighter
+and its eyes, nose shadow and mouth all read more clearly. Nor is it recoverable by
+turning the amount up: a self-guided filter only amplifies variance *inside* a region
+and smooth skin has almost none, so 0.45 → 0.95 moved open area 1.11% → 1.13% and
+changed nothing visible. The edge-aware path ships as an opt-in escape hatch
+(`PhotoParams.localContrastEdgeAware`, default off) for high-key images where several
+bright regions' halos would eat all the background between them.
+
+### 4b. A can is not a monitor — don't aim for a display gamma
+
+The obvious tone target for a photo is an end-to-end exponent of 2.2, so open area
+tracks the display-referred luminance of the original. `photo.ts` aimed at exactly that
+and hit it: the sampler contributes a measured 1.373, so its `gamma` of 1.6 landed the
+chain at 2.197, within 0.15% of target.
+
+The arithmetic was right and **the target was wrong**. A monitor can output a real
+white; a perforated can tops out at 11.67% open area at the Standard tuple, so the
+entire output range is one dim eighth of the wall — and squaring it throws most of that
+away. Measured on two real portraits shot against bright backgrounds, the face came out
+at **1.29% open against a 3.15% background**: the subject rendered 2.4× darker than its
+surroundings, which is rule 3b exactly inverted, and was reported as "both faces are
+too dark".
+
+Aim instead for open area proportional to **perceptual** tone — exponent ~1.0, so
+`gamma` = 1/1.373 ≈ 0.7. The same face then measures 3.52% against 3.41%: slightly
+brighter than its surroundings rather than a hole in them.
+
+Two corollaries:
+
+- **`vignette` is subject dominance, not decoration.** It darkens toward the frame, and
+  on a portrait the frame is exactly where the background lives — so it is the one
+  control that suppresses background without touching the subject. Dropping it from
+  0.55 to 0.35 raised background open area 3.64% → 4.51% with the face unchanged; it is
+  now 0.7 for the same reason in reverse.
+- **Don't auto-invert a bright-background portrait.** It was built, it worked exactly as
+  designed, and it looked worse: inverting a face makes hair bright and skin dark, i.e.
+  a photographic negative, which reads as eerie rather than as a portrait. Those images'
+  real problem was the gamma above, not their polarity. `invert` stays a manual button.
+
+**The test that would have caught all of this is one real photograph.** The synthetic
+portrait in `render.mjs` was built dark-background/light-subject — the single polarity
+where a compressive curve does no visible harm — so it cleared every metric while the
+default was badly wrong for the common case. `tools/measure/photos.mjs` exists to stop
+that repeating: point it at real images and it flags face-vs-background open area, the
+rule 8 band and the rule 2 floor per pattern.
+
+### 4c. Punch is per-image, and the target is the only judgement in it
+
+Rule 4b sets the tone curve's *shape*; the exponent itself cannot be a constant. Punch
+(`PhotoParams.gamma`) trades face brightness against face contrast, and how much each
+image needs depends on how much contrast the subject already carries. Measured on two
+ordinary portraits, the values wanted were **0.7 and ~1.3** — nearly a factor of two —
+because one face had glasses and dark hair supplying its own contrast and the other was
+an evenly-lit studio shot whose features sat close to the skin tone. One constant served
+the first and produced "too bright, you can't see face details anymore" on the second.
+
+`solveAutoPunch()` closes the loop instead of guessing: probe two gammas, measure what
+the real tone pipeline produces, interpolate to a target. Relative contrast is near
+enough linear in gamma over the useful range that two probes suffice.
+
+Three things that are easy to get wrong here:
+
+- **Normalise contrast by the mean.** Raw RMS scales with brightness, so it scores any
+  darkening as a contrast *loss* even when features became more distinct. Un-normalised,
+  the measurement ranked higher gamma as worse — the exact opposite of what looking at
+  the renders showed.
+- **The target is resolution-coupled.** The solve runs at 2 px/mm for speed, where the
+  same approved setting measures 0.2064 against 0.1959 at the render's 8. Shipping the
+  8 px/mm number drove an image that wanted 0.70 onto the 0.60 clamp. `PROBE_PPM` and
+  `AUTO_PUNCH_TARGET` are one calibration, not two knobs.
+- **Measure the whole frame, and know which way that biases.** Nothing in production
+  knows where the subject is, and this project cannot have a face detector. A large flat
+  background reads low, so the solver overshoots on such images — landing 1.31 where a
+  face-only match said ~1.1. No whole-image target can reproduce a face-only match on
+  both images; that is the trade, and the direction at least favours contrast on exactly
+  the images that lacked it.
+
+The target is anchored on the single setting a human approved. If results drift, change
+that number and nothing else.
+
 ### 5. Density carries tone, not size
 
 Hole diameter alone spans maybe 4× in area — not enough. Real blacks (no holes at all)
@@ -210,6 +296,102 @@ cropping — and it deliberately runs on the built `field`, not as a separate re
 layer, so it gets the ordinary treatment: rule 6 band-limiting, rule 4's moat, and
 rule 3's bold weight (thin fonts dissolve exactly like thin outlines do).
 
+### 10. `dither` is an axis, not a look — and open area must stay flat across it
+
+`stipple.ts` carries `mode` (fm/am/hybrid, how tone becomes density-and-size) and
+`dither` (how the density decision is made at each cell). They are deliberately
+independent, because that is the only way to add looks without restyling twenty tuned
+presets: the default `hash` is the original code path and reproduces every preset
+**hole-for-hole**. `tools/measure/baseline.mjs` prints a per-preset position checksum;
+if it moves, something that should have been additive wasn't. (The checksums are also
+why hole coordinates must stay `Float64` — staging them through a `Float32Array` shifts
+every hole by nanometres and quietly destroys the property.)
+
+Three combinations ship, via `generators.ts`:
+
+| | MTF@48c | chaining | open area |
+|---|---|---|---|
+| Classic (hash) | 0.796 | 0.378 | 11.67% |
+| Smooth (blue) | 0.785 | 0.013 | 11.67% |
+| Detail (diffusion) | 0.897 | 0.153 | 11.67% |
+
+`MTF@48c` is how much contrast survives at ~4mm features — the size of an eye in a
+portrait. `chaining` is the concentration of nearest-neighbour directions at mid-tone;
+high means the dots fall into lines, which reads as faint scratches across a smooth
+gradient. Four things to take from it:
+
+- **Judge a dither by direction, not by variance.** Density variance over 5×5-cell
+  windows says all three are equally good (0.36–0.60× random). It is the wrong metric:
+  the reference hash is a closed-form lattice function, so near simple rational
+  densities it degenerates into visible chains, and only the directional statistic
+  sees it. Smooth exists entirely because of that second measurement.
+- **Open area must stay flat across the set**, or the picker doubles as a brightness
+  control and every switch needs the tone sliders re-tuned. It is free for these three
+  because they share the hex lattice. It is *not* free in general — see below.
+- **Error diffusion's threshold modulation is a measured trade** (`ED_THRESHOLD_MOD`),
+  not a taste: 0.12 gives chaining 0.294 / MTF 0.959, and 0.60 gives 0.095 / 0.816, by
+  which point it has degraded back to mask-dither territory. 0.40 is the knee.
+- **AM has no density decision**, so all three patterns are *identical* on an AM preset.
+  Mango Salvaje is the library's one AM design and also the default, so the UI says so
+  out loud rather than letting three buttons look dead.
+
+Three things were built, measured, and deliberately left out. Do not re-attempt them
+without reading these first.
+
+- **Off-grid "Organic" (wrapped Poisson-disk, Bridson).** Worked, wrapped seamlessly,
+  and was structurally the *safest* option — Poisson-disk enforces its minimum distance
+  by construction and needs no jitter, so it measured a 0.524mm web where jittered hex
+  measures 0.424mm from a nominal 0.93mm (rule 2's erosion, exactly). Dropped on the
+  look: local density variation measured 0.220 at mid-tone against hex's 0.076, which
+  reads as clumping rather than as hand-stippling. If it is ever revisited, the fix is
+  to rank the actual point set (sample-elimination ordering) instead of tiling a 64×64
+  mask over irregular points — and the thing worth keeping from the first attempt is
+  that its packing constant had to be **measured**: the textbook 69%-of-hex figure
+  predicts a 0.83 spacing factor, which came out 25% short because Bridson does not
+  saturate. 0.72 matched hex density to 1.001. Any future off-grid pattern needs the
+  same calibration or it silently changes exposure.
+- **Tone linearisation**, which `photo.ts`'s own comment proposes.
+  `tools/measure/response.ts` has the numbers: the normalised response curve is
+  invariant within 3% across every dither and quality tuple, and the hard-coded
+  `gamma: 1.6` already lands the end-to-end exponent within 0.15% of its 2.2 target.
+  It would have replaced a verified-correct tuned constant with a computed one for no
+  visible change.
+- **Edge-aware local contrast as the default** — see rule 4's corollary.
+
+Weighted Voronoi stippling (StippleGen) and weighted Linde–Buzo–Gray (Deussen 2017)
+were both considered and rejected before implementation: they give the organic look and
+neither gives a minimum-spacing guarantee, which rule 2 makes non-negotiable. The
+lesson generalises — the algorithms worth porting from the halftoning literature are
+the ones that act *on* the existing grid (error diffusion, void-and-cluster), because
+those inherit rule 2 for free.
+
+---
+
+## Measurement harness
+
+`tools/measure/` runs the real engine inside the preinstalled Chromium (the engine is
+not portable to bare Node — `FieldCtx` and `photo.ts` both rasterize through a real
+Canvas2D, which is the whole point of the port plan below).
+
+```
+node tools/measure/run.mjs tools/measure/baseline.mjs   # per-preset checksums - run before AND after any sampler change
+node tools/measure/run.mjs tools/measure/mtf.mjs        # modulation transfer + reconstruction error
+node tools/measure/run.mjs tools/measure/dither.mjs     # tone fidelity + uniformity
+node tools/measure/run.mjs tools/measure/seam.mjs       # rule 1: density across x=0/W, and closest pair
+node tools/measure/run.mjs tools/measure/render.mjs OUT # lit/unlit PNGs, for the judgments no metric makes
+```
+
+`run.mjs <script.mjs>` bundles `browser-entry.ts`, injects it, and hands the script a
+`run(fn)` that evaluates `fn` in the page with `window.LAMP` holding the engine. A
+constant field can be passed as a **1×1** array — `stipple()` clamps its sample index,
+so every candidate point reads the same value, which is what makes response curves
+cheap to measure against the real sampler instead of a model of it.
+
+Use `render.mjs` for anything compositional. Rule 8 is explicit that there is no
+numeric check for "too much fussy detail", and the same goes for whether a halo helps
+or hurts (rule 4) — both were settled by looking at the PNGs, after the metrics had
+pointed the wrong way.
+
 ---
 
 ## Port plan
@@ -252,14 +434,21 @@ Do not build the UI first.
 - **Live readout**: hole count + measured min web, red when under target
 - **Preview**: unlit (dots on metal) / lit (backlit glow) toggle, and a cylinder mock-up
 - **Export**: SVG at exact mm dimensions, `viewBox = "0 0 W H"`
+- **Photo tone**: plain Brightness and Contrast sliders (neutral at 0) alongside Punch,
+  Simplify and Local contrast. Brightness is a gain, not an offset, so black stays black
+  per rule 5.
 - **Personalize**: an optional short text label (name/date), composited on top of preset
   or custom alike — position as a fraction of circumference, vertical anchor + offset,
   letter height. See rule 9.
 - **Back-of-can features**: LED wire hole toggle (rule 9), diameter/margin in Advanced.
+- **Dot pattern**: the three named generators from `generators.ts` (rule 10), each with
+  a one-line hint. Sits between Quality and Hole size, since it is a peer of both.
+  Loading a photo switches to Detail unless the user has already picked one by hand.
 
 (This list predates the preset library, the custom shape editor, and mobile support,
 none of which it describes — treat it as a historical starting spec, not current UI
-inventory. The two bullets above are the exception, added when those features shipped.)
+inventory. The three bullets above are the exception, added when those features
+shipped.)
 
 ## Constraints
 
