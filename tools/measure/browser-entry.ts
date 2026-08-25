@@ -9,6 +9,7 @@
 import * as generate from '../../src/engine/generate';
 import * as stipple from '../../src/engine/stipple';
 import * as photo from '../../src/engine/photo';
+import * as portrait from '../../src/engine/portrait';
 import * as fieldkit from '../../src/engine/fieldkit';
 import * as minweb from '../../src/engine/minweb';
 import * as glow from '../../src/engine/glow';
@@ -21,6 +22,7 @@ import * as bluenoise from '../../src/engine/bluenoise';
   ...generate,
   ...stipple,
   ...photo,
+  ...portrait,
   ...fieldkit,
   ...minweb,
   ...glow,

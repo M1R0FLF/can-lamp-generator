@@ -66,6 +66,31 @@ export interface StippleParams {
   seed: number;
   /** density decision rule. 'hash' is the reference screen hash. */
   dither: DitherKind;
+  /**
+   * Per-ROW horizontal shift, as a fraction of pitch. 0 disables it.
+   *
+   * Exists because a hex lattice has only two column phases (0 and half a
+   * pitch), so at low `jitter` it is a near-perfect grid and reads as visible
+   * vertical striping — measured as a column-phase CoV of 1.82 at jitter 0.05.
+   * That never showed up on the presets, which run jitter 0.15 at a coarse
+   * pitch; it appears as soon as a portrait wants a fine pitch and low jitter.
+   *
+   * Raising `jitter` breaks the columns but wrecks rule 2: at pitch 0.85 it
+   * takes the measured web from 0.404mm to 0.284 at jitter 0.12 and 0.139 at
+   * 0.20. A rigid per-row translation is the cheap alternative — it leaves
+   * in-row spacing exactly at the pitch, and its worst case on the row-to-row
+   * distance is BOUNDED rather than compounding:
+   *
+   *   distance = sqrt(rowSpacing^2 + dx^2), rowSpacing = pitch*sqrt(3)/2
+   *
+   * so even if two adjacent rows align exactly (dx = 0) the distance only
+   * falls to 0.866*pitch. At 0.25 and above that is the worst case; below it,
+   * dx cannot reach 0 and the bound is tighter still.
+   *
+   * Drawn from a SEPARATE rng from the per-hole jitter, so leaving this at 0
+   * consumes no random numbers and the reference path stays bit-identical.
+   */
+  rowShift: number;
 }
 
 export const DEFAULT_STIPPLE: StippleParams = {
@@ -80,6 +105,7 @@ export const DEFAULT_STIPPLE: StippleParams = {
   fixedDiameterMm: 0.35,
   seed: 3,
   dither: 'hash',
+  rowShift: 0,
 };
 
 export interface StippleResult {
@@ -166,6 +192,8 @@ export function stipple(
   // order (two calls per cell, before any culling test), so the 'hash' path
   // stays hole-for-hole identical to the single-pass version it replaces.
   const rng = mulberry32(p0.seed);
+  // separate stream: keeps the per-hole jitter sequence untouched when off
+  const rowRng = mulberry32(p0.seed ^ 0x9e3779b9);
   // Float64, not Float32: these are hole coordinates in mm and they go
   // straight into the exported SVG. Rounding them to single precision moves
   // every hole by a few nanometres, which is invisible on the can but makes
@@ -177,9 +205,10 @@ export function stipple(
   const cy = new Float64Array(count);
   for (let j = 0; j < rows; j++) {
     const yRow = (j + 0.5) * rowsp;
+    const shift = p0.rowShift > 0 ? (rowRng() - 0.5) * 2 * p0.rowShift * p : 0;
     for (let i = 0; i < cols; i++) {
       const k = j * cols + i;
-      let x = (i + (j % 2 ? 0.5 : 0.0)) * p + p * 0.5;
+      let x = (i + (j % 2 ? 0.5 : 0.0)) * p + p * 0.5 + shift;
       x += (rng() - 0.5) * 2 * jitter * p;
       cx[k] = x;
       cy[k] = yRow + (rng() - 0.5) * 2 * jitter * rowsp;
