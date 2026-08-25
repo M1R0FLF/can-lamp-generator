@@ -180,6 +180,9 @@ const FACE_CENTRE_Y = 0.45;
  */
 const MEDALLION_OVER_FACE = 1.7;
 
+/** How far the solved pan may go, in medallion widths. See framingFor(). */
+const PAN_LIMIT = 2;
+
 /**
  * Solve a placement that puts this face at a chosen fraction of the wall height,
  * centred on the front of the can.
@@ -245,11 +248,18 @@ export function framingFor(
     seam: 'fade',
     coverage,
     zoom,
-    // clamped to the ranges the UI sliders expose, so a solved placement is
+    // Clamped to the ranges the UI sliders expose, so a solved placement is
     // always one the user can then adjust by hand rather than a state they
-    // cannot reproduce
-    offsetX: Math.min(0.5, Math.max(-0.5, offsetX)),
-    offsetY: Math.min(0.5, Math.max(-0.5, offsetY)),
+    // cannot reproduce.
+    //
+    // PAN_LIMIT is +/-2, not the +/-0.5 the sliders originally allowed. The
+    // offsets are fractions of the MEDALLION width, and centring a face that
+    // sits off to one side of a wide photo — after zooming in on it — needs a
+    // pan of more than half a medallion. At 0.5 the solve saturated and the
+    // face came out shoved against the edge of the lit area with one cheek
+    // clipped off. The sliders were widened to match.
+    offsetX: Math.min(PAN_LIMIT, Math.max(-PAN_LIMIT, offsetX)),
+    offsetY: Math.min(PAN_LIMIT, Math.max(-PAN_LIMIT, offsetY)),
   };
 }
 

@@ -24,6 +24,22 @@ import {
   placementFor,
 } from './engine/photo';
 import { PRESETS, getPreset } from './engine/presets';
+import {
+  PortraitParams,
+  DEFAULT_PORTRAIT_PARAMS,
+  DEFAULT_HEAD_HEIGHT_FRAC,
+  PORTRAIT_PLACEMENT,
+  PORTRAIT_STIPPLE,
+  PORTRAIT_QUALITY,
+  faceWidthFor,
+} from './engine/portrait';
+import {
+  FaceBox,
+  findFace,
+  framingFor,
+  loadFaceFinder,
+  faceWidthOnCan,
+} from './engine/faceFind';
 import { GENERATORS, DEFAULT_GENERATOR_ID, getGenerator } from './engine/generators';
 import { Hole, StippleMode, StippleParams, DEFAULT_STIPPLE } from './engine/stipple';
 import { renderGlow } from './engine/glow';
@@ -113,6 +129,18 @@ interface State {
   photoName: string;
   photoPlacement: PhotoPlacement;
   photoParams: PhotoParams;
+  /**
+   * Which pipeline the loaded image goes through. A face and a picture want
+   * genuinely different processing (see portrait.ts), so this is a real fork
+   * rather than a preset of the same one. Set from detection on load, then the
+   * user's to override.
+   */
+  photoMode: 'portrait' | 'photo';
+  portraitParams: PortraitParams;
+  /** last detection, in source-image pixels. null = none found. */
+  faceBox: FaceBox | null;
+  /** head height as a fraction of wall height, the framing's main control */
+  headHeightFrac: number;
 }
 
 const state: State = {
@@ -151,6 +179,10 @@ const state: State = {
   photoName: '',
   photoPlacement: { ...DEFAULT_PLACEMENT },
   photoParams: { ...DEFAULT_PHOTO_PARAMS },
+  photoMode: 'portrait',
+  portraitParams: { ...DEFAULT_PORTRAIT_PARAMS },
+  faceBox: null,
+  headHeightFrac: DEFAULT_HEAD_HEIGHT_FRAC,
 };
 
 let result: GenerateResult | null = null;
@@ -226,6 +258,10 @@ let generatorTouched = false;
 // choice they made with the render in front of them.
 let punchTouched = false;
 
+// Set once the user picks face-vs-picture by hand, so detection on the next
+// upload stops overriding them.
+let photoModeTouched = false;
+
 function buildGeneratorPicker() {
   const seg = el('generatorSeg');
   seg.innerHTML = '';
@@ -238,6 +274,46 @@ function buildGeneratorPicker() {
   }
 }
 
+/**
+ * Portrait params with `faceWidthMm` filled in from the live geometry.
+ *
+ * Kept out of `state.portraitParams` deliberately: the face's width ON THE CAN
+ * is derived from the detection, the placement and the can's own size, so
+ * storing it would mean three ways to get it stale (change the diameter, drag
+ * zoom, load a new photo). The tone stage needs it to set the identity band's
+ * scale, so it is computed at use.
+ *
+ * With no detection it falls back to estimating from the placement, which is
+ * roughly right for a portrait-shaped photo and the reason `faceWidthFor`
+ * still exists.
+ */
+function portraitParamsForCan(can: CanSpec): PortraitParams {
+  const ctx = photoFieldCtx(can);
+  const img = state.photoImage;
+  const faceWidthMm =
+    state.faceBox && img
+      ? faceWidthOnCan(state.faceBox, state.photoPlacement, img.width, img.height, ctx.W, ctx.H, can.ppm)
+      : faceWidthFor(state.photoPlacement, ctx.W, ctx.H);
+  return { ...state.portraitParams, faceWidthMm };
+}
+
+/**
+ * Re-solve the crop from the current detection and head-size setting.
+ *
+ * Separate from loading so that changing the head-size slider, or the can's
+ * dimensions, re-frames without re-running detection.
+ */
+function reframeOnFace(): boolean {
+  const img = state.photoImage;
+  if (!img || !state.faceBox) return false;
+  const can: CanSpec = { diameterMm: state.diameterMm, heightMm: state.heightMm, ppm: PPM_FULL };
+  const ctx = photoFieldCtx(can);
+  state.photoPlacement = framingFor(
+    state.faceBox, img.width, img.height, ctx.W, ctx.H, can.ppm, state.headHeightFrac
+  );
+  return true;
+}
+
 // ---------- resolve the stipple params in play ----------
 function effectiveStipple(): StippleParams {
   // Gated on an image actually being loaded, not just on the tab being open:
@@ -245,13 +321,25 @@ function effectiveStipple(): StippleParams {
   // stipple params have to fall back in step or the preview would be sampled
   // with photo tuning (knee 0.95) while showing preset artwork.
   const designPart =
-    state.sourceKind === 'photo' && state.photoImage ? PHOTO_STIPPLE :
+    state.sourceKind === 'photo' && state.photoImage
+      ? (state.photoMode === 'portrait' ? PORTRAIT_STIPPLE : PHOTO_STIPPLE) :
     state.sourceKind === 'custom' ? CUSTOM_STIPPLE :
     getPreset(state.presetId).stipple;
-  const q = QUALITY_PRESETS[state.qualityIndex];
-  const qualityPart = q
-    ? { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter }
-    : {};
+  // The face pipeline has its own quality ladder — see PORTRAIT_QUALITY. It has
+  // to be consulted HERE rather than layered under the design tuple, because
+  // the quality part is applied after it and would otherwise overwrite the
+  // portrait pitch with a preset one, throwing away the pipeline's single most
+  // important variable.
+  const portraitMode =
+    state.sourceKind === 'photo' && !!state.photoImage && state.photoMode === 'portrait';
+  let qualityPart: Partial<StippleParams> = {};
+  if (portraitMode) {
+    const q = PORTRAIT_QUALITY[Math.min(PORTRAIT_QUALITY.length - 1, state.qualityIndex)];
+    qualityPart = { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter, rowShift: q.rowShift };
+  } else {
+    const q = QUALITY_PRESETS[state.qualityIndex];
+    if (q) qualityPart = { pitchMm: q.pitch, dMin: q.dMin, dMax: q.dMax, jitter: q.jitter };
+  }
   // The generator sits between the design's own tuning and the user's explicit
   // Advanced overrides: it is a deliberate choice, so it beats a preset's
   // default, but it only carries `grid`/`dither` and must not shadow anything
@@ -292,7 +380,10 @@ function regenerate(ppm: number) {
   const photoSrc = state.sourceKind === 'photo' ? photoSourceFor(can) : null;
   const source: SourceSpec =
     state.sourceKind === 'custom' ? { kind: 'custom', shapes: state.shapes }
-    : photoSrc ? { kind: 'photo', source: photoSrc, params: state.photoParams }
+    : photoSrc
+      ? state.photoMode === 'portrait'
+        ? { kind: 'portrait', source: photoSrc, params: portraitParamsForCan(can) }
+        : { kind: 'photo', source: photoSrc, params: state.photoParams }
     : { kind: 'preset', presetId: state.presetId };
   const annotation: AnnotationSpec | undefined = state.annotationText.trim()
     ? {
@@ -806,6 +897,39 @@ function syncInputs() {
   set('photoOffsetY', String(pl.offsetY));
   set('photoPosterize', String(pp.posterize));
   set('photoGamma', String(pp.gamma));
+  {
+    const q = state.portraitParams;
+    set('portraitHead', String(state.headHeightFrac));
+    set('portraitBoost', String(q.identityBoost));
+    set('portraitBright', String(q.brightness));
+    set('portraitContrast', String(q.contrast));
+    set('portraitVig', String(q.vignette));
+    set('portraitLevels', String(q.levels));
+    setText('portraitHeadVal', `${Math.round(state.headHeightFrac * 100)}% of wall`);
+    setText('portraitBoostVal', q.identityBoost.toFixed(2));
+    const sg = (v: number) => (v === 0 ? '0' : `${v > 0 ? '+' : ''}${Math.round(v * 100)}`);
+    setText('portraitBrightVal', sg(q.brightness));
+    setText('portraitContrastVal', sg(q.contrast));
+    setText('portraitVigVal', q.vignette.toFixed(2));
+    setText('portraitLevelsVal', q.levels >= 2 ? `${Math.round(q.levels)}` : 'smooth');
+    for (const b of document.querySelectorAll<HTMLElement>('#photoModeSeg button')) {
+      b.classList.toggle('active', b.dataset.photomode === state.photoMode);
+    }
+    // the two pipelines have disjoint controls; showing both would imply the
+    // inactive set is doing something
+    const isPortrait = state.photoMode === 'portrait';
+    const pProps = document.getElementById('portraitProps');
+    if (pProps) pProps.style.display = isPortrait ? 'block' : 'none';
+    for (const id of ['photoToneGroup']) {
+      const n = document.getElementById(id);
+      if (n) n.style.display = isPortrait ? 'none' : 'block';
+    }
+    const rec = document.getElementById('portraitRecentre') as HTMLButtonElement | null;
+    if (rec) {
+      rec.disabled = !state.faceBox;
+      rec.title = state.faceBox ? '' : 'No face was detected in this photo';
+    }
+  }
   set('photoBrightness', String(pp.brightness));
   set('photoContrast', String(pp.contrast));
   set('photoLocalContrast', String(pp.localContrast));
@@ -1097,6 +1221,38 @@ async function loadPhotoFile(file: File | undefined | null) {
           : 'Upright, so it sits on the front with the back left dark.')
     );
     el('photoProps').style.display = 'block';
+
+    // ---- is it a face? ----
+    //
+    // Detection decides which pipeline the image goes through, so it runs on
+    // load rather than waiting for the user to pick. The cascade is 234KB and
+    // fetched on first use, so a session that only ever renders presets never
+    // downloads it.
+    //
+    // Every failure here is non-fatal by design: a blocked fetch, an offline
+    // reload or a photo with no findable face must all still give the user a
+    // working picture, so each falls through to the 'photo' pipeline with its
+    // own placement rather than throwing.
+    state.faceBox = null;
+    let faceMsg = '';
+    try {
+      await loadFaceFinder();
+      state.faceBox = findFace(bmp);
+      if (state.faceBox) {
+        if (!photoModeTouched) state.photoMode = 'portrait';
+        state.headHeightFrac = DEFAULT_HEAD_HEIGHT_FRAC;
+        reframeOnFace();
+        faceMsg = `Face found — framed on it, ${Math.round(state.faceBox.w)}px wide in your photo.`;
+      } else {
+        if (!photoModeTouched) state.photoMode = 'photo';
+        faceMsg = 'No face found, so this is being treated as a picture. Switch to “A face” to force the face pipeline.';
+      }
+    } catch {
+      if (!photoModeTouched) state.photoMode = 'photo';
+      faceMsg = "Couldn't load the face detector, so this is being treated as a picture.";
+    }
+    setText('faceStatus', faceMsg);
+
     // A photograph wants the Detail pattern, so switch to it on load rather
     // than leaving the user to discover it. Error diffusion holds ~13% more
     // contrast at ~4mm features (measured; see generators.ts) and 4mm is the
@@ -1109,7 +1265,7 @@ async function loadPhotoFile(file: File | undefined | null) {
     // two portraits wanted values nearly a factor of two apart. Solve it from
     // the image instead of shipping one compromise. Deferred to the user the
     // moment they touch the slider.
-    if (!punchTouched) {
+    if (!punchTouched && state.photoMode === 'photo') {
       state.photoParams.gamma = solveAutoPunch(
         bmp, Math.PI * state.diameterMm, state.heightMm,
         state.photoPlacement, state.photoParams, effectiveStipple().pitchMm
@@ -1222,6 +1378,65 @@ el('photoEdgeAwareSeg').addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest('button');
   if (!btn) return;
   state.photoParams.localContrastEdgeAware = btn.dataset.edgeaware === '1';
+  syncInputs();
+  draftThenFull();
+});
+
+// ---------- portrait (face) controls ----------
+el('photoModeSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.photoMode = btn.dataset.photomode as 'portrait' | 'photo';
+  photoModeTouched = true;
+  // switching INTO face mode should re-frame on the face, since the photo
+  // pipeline's placement is a whole-image composition and the face pipeline's
+  // is a crop; leaving the old one would show a face mode that looks broken
+  if (state.photoMode === 'portrait') reframeOnFace();
+  else if (state.photoImage) {
+    state.photoPlacement = placementFor(
+      state.photoImage.width, state.photoImage.height, Math.PI * state.diameterMm, state.heightMm
+    );
+  }
+  photoCache = null;
+  syncInputs();
+  draftThenFull();
+});
+
+// Head size re-solves the crop, so it goes through reframeOnFace() rather than
+// straight into the params.
+el('portraitHead').addEventListener('input', () => {
+  state.headHeightFrac = Number(el<HTMLInputElement>('portraitHead').value);
+  reframeOnFace();
+  photoCache = null;
+  syncInputs();
+  draftThenFull();
+});
+
+function portraitTone<K extends keyof PortraitParams>(id: string, key: K) {
+  el(id).addEventListener('input', () => {
+    state.portraitParams[key] = Number(el<HTMLInputElement>(id).value) as PortraitParams[K];
+    syncInputs();
+    draftThenFull();
+  });
+}
+portraitTone('portraitBoost', 'identityBoost');
+portraitTone('portraitBright', 'brightness');
+portraitTone('portraitContrast', 'contrast');
+portraitTone('portraitVig', 'vignette');
+portraitTone('portraitLevels', 'levels');
+
+el('portraitRecentre').addEventListener('click', () => {
+  if (!reframeOnFace()) return;
+  photoCache = null;
+  syncInputs();
+  draftThenFull();
+});
+
+el('portraitReset').addEventListener('click', () => {
+  state.portraitParams = { ...DEFAULT_PORTRAIT_PARAMS };
+  state.headHeightFrac = DEFAULT_HEAD_HEIGHT_FRAC;
+  reframeOnFace();
+  photoCache = null;
   syncInputs();
   draftThenFull();
 });

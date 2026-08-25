@@ -122,6 +122,36 @@ export const PORTRAIT_STIPPLE = {
   thresh: 0.05,
 };
 
+/**
+ * Quality ladder for faces, replacing QUALITY_PRESETS when the face pipeline is
+ * active.
+ *
+ * A separate ladder rather than reusing the presets' one because the two have
+ * different jobs. The preset ladder spans 2.2-0.98mm, tuned for graphic designs
+ * where 1.45 is comfortable; a face needs roughly half that, so even the
+ * presets' finest tuple is only the coarse end here. Reusing it also had a
+ * concrete bug: `effectiveStipple()` applies the quality tuple AFTER the
+ * design's own, so Standard's 1.45mm silently overwrote the portrait 0.85 and
+ * the single most important variable in this pipeline was being thrown away.
+ *
+ * Hole sizes shrink with pitch to hold the web, and `rowShift` eases off at the
+ * fine end for the same reason (see stipple.ts) — it costs web too. Both were
+ * tightened after the first version measured 0.308mm at Fine and 0.283mm at
+ * Ultra, i.e. Ultra shipped a setting that could not be cut. The measured floor
+ * is the check, not the nominal pitch-minus-diameter.
+ *
+ * The two finest tuples are provisional: laserability.mjs says their measured
+ * web survives +/-0.03mm of positional error but not +/-0.05, and the smallest
+ * holes are below anything this machine has cut. The calibration can settles
+ * both — until then Standard is the default for a reason.
+ */
+export const PORTRAIT_QUALITY = [
+  { label: 'Draft', pitch: 1.1, dMin: 0.24, dMax: 0.44, jitter: 0.06, rowShift: 0.25 },
+  { label: 'Standard', pitch: 0.85, dMin: 0.18, dMax: 0.34, jitter: 0.05, rowShift: 0.25 },
+  { label: 'Fine', pitch: 0.75, dMin: 0.15, dMax: 0.27, jitter: 0.03, rowShift: 0.18 },
+  { label: 'Ultra', pitch: 0.65, dMin: 0.13, dMax: 0.22, jitter: 0.02, rowShift: 0.15 },
+];
+
 export interface PortraitParams {
   /**
    * Assumed face width in mm on the can. Sets the identity band's scale, so it

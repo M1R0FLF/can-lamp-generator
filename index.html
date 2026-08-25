@@ -116,6 +116,57 @@
 
         <div id="photoProps" style="display:none;">
           <div class="field" style="margin-top:10px;">
+            <label>What is this picture?</label>
+            <div class="segmented" id="photoModeSeg">
+              <button data-photomode="portrait" class="active">A face</button>
+              <button data-photomode="photo">Any picture</button>
+            </div>
+            <p class="hint" id="faceStatus"></p>
+          </div>
+
+          <div id="portraitProps">
+            <div class="row2" style="margin-top:12px;">
+              <div class="field">
+                <label>Head size <span class="val" id="portraitHeadVal"></span></label>
+                <input type="range" id="portraitHead" min="0.45" max="0.98" step="0.01" />
+              </div>
+              <div class="field">
+                <label>Face detail <span class="val" id="portraitBoostVal"></span></label>
+                <input type="range" id="portraitBoost" min="0" max="2" step="0.05" />
+              </div>
+            </div>
+            <p class="hint">Head size is the strongest control here — a bigger face on the
+              can is what makes it recognisable from across a room. Face detail sharpens
+              the eye/nose/mouth scale specifically; past about 1.2 it starts to look
+              harsh.</p>
+
+            <div class="row2">
+              <div class="field">
+                <label>Brightness <span class="val" id="portraitBrightVal"></span></label>
+                <input type="range" id="portraitBright" min="-1" max="1" step="0.02" />
+              </div>
+              <div class="field">
+                <label>Contrast <span class="val" id="portraitContrastVal"></span></label>
+                <input type="range" id="portraitContrast" min="-1" max="1" step="0.02" />
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label>Darken the edges <span class="val" id="portraitVigVal"></span></label>
+                <input type="range" id="portraitVig" min="0" max="1" step="0.05" />
+              </div>
+              <div class="field">
+                <label>Tone steps <span class="val" id="portraitLevelsVal"></span></label>
+                <input type="range" id="portraitLevels" min="0" max="12" step="1" />
+              </div>
+            </div>
+            <div class="row2" style="margin-top:10px;">
+              <button class="secondary" id="portraitRecentre">Re-centre on face</button>
+              <button class="secondary" id="portraitReset">Reset look</button>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top:10px;">
             <label>How it fills the can</label>
             <div class="segmented" id="photoFitSeg">
               <button data-fit="cover" class="active">Fill</button>
@@ -148,14 +199,17 @@
           <div class="row2">
             <div class="field">
               <label>Move sideways <span class="val" id="photoOffsetXVal"></span></label>
-              <input type="range" id="photoOffsetX" min="-0.5" max="0.5" step="0.01" />
+              <input type="range" id="photoOffsetX" min="-2" max="2" step="0.01" />
             </div>
             <div class="field">
               <label>Move up/down <span class="val" id="photoOffsetYVal"></span></label>
-              <input type="range" id="photoOffsetY" min="-0.5" max="0.5" step="0.01" />
+              <input type="range" id="photoOffsetY" min="-2" max="2" step="0.01" />
             </div>
           </div>
 
+          <!-- The whole-picture tone pipeline. Hidden in face mode, where
+               portrait.ts drives tone instead and these controls do nothing. -->
+          <div id="photoToneGroup">
           <div class="row2" style="margin-top:12px;">
             <div class="field">
               <label>Brightness <span class="val" id="photoBrightnessVal"></span></label>
@@ -242,6 +296,7 @@
               blank. Edge boost traces outlines, which survive the dot grid better
               than fine shading does.</p>
           </details>
+          </div>
         </div>
       </details>
 
