@@ -210,6 +210,55 @@ cropping — and it deliberately runs on the built `field`, not as a separate re
 layer, so it gets the ordinary treatment: rule 6 band-limiting, rule 4's moat, and
 rule 3's bold weight (thin fonts dissolve exactly like thin outlines do).
 
+### 10. The default panel is for someone who has never seen a laser
+
+Learned by shipping the opposite. The tool grew to ~50 visible controls and the verdict
+was blunt: *"We have too much settings, that do too little... so many variables to change
+with our own image, usually very weird or unknown ones? Please dumb it down, you forget
+that normal people need to use this."*
+
+The rule that came out of it: **the default panel carries only choices whose effect a
+non-expert can predict from the label.** Anything else stays behind a collapsed
+`<details class="advanced">` — kept, not deleted, because the tuning matters and the
+person running the laser is also a user.
+
+Concretely, after the cut-down pass:
+
+- **Preset path**: Can · Source · Personalize · one Quality slider · *Advanced ▸* ·
+  Ready to cut? — the whole panel fits on one screen.
+- **Photo path**: six controls — where it goes (round / front only), zoom, move X, move Y,
+  Brightness, Contrast — plus Invert / Reset and *Advanced ▸* for the other twelve.
+- **Shape editor**: a *Simple / All shapes* switch over the palette — Simple drops the six
+  category tabs entirely and shows the 20 curated stamps in `SIMPLE_SHAPE_IDS`
+  ([library.ts](src/engine/shapes/library.ts)); All brings the tabs and all 56 back. Tools
+  visible: size, rotation, Repeat around the can (+count), Duplicate, Delete, Clear all.
+  *Advanced ▸* holds the six Align buttons and Space around / Space vertically / Flip ↔ / Flip ↕.
+  **Repeat around stays on the main panel on purpose** — it is the one tool that only exists
+  because the substrate is a cylinder, and it is how a wrap pattern actually gets made.
+- **Ready to cut?** answers one question in a sentence ("Looks good to cut." / "Metal
+  between holes is only 0.21 mm — it may tear...") and shows the two numbers a person
+  plans around: hole count and rough cut time. The five diagnostics live under *Details ▸*.
+
+Three specific things not to re-add:
+
+- **A user-facing tone-mode picker (FM / AM / Hybrid).** The three modes are real and rule
+  5 still needs all three — but they are a *design-time* choice. 20 of 21 presets ship
+  `hybrid` and photos force `hybrid` regardless, so the select changed nothing a user
+  could see while costing a decision. Presets keep setting `stipple.mode` themselves.
+- **Two controls for one value.** "Brightness" and "Contrast" on the photo panel are
+  plain-language *views* of the existing `gamma` and `localContrast` — mapped in main.ts,
+  not new engine parameters — so Advanced stays authoritative and `Reset look` still
+  works. Advanced deliberately does **not** also show the raw `gamma`/`localContrast`
+  sliders. (The seam control is the one exception: the main panel's two-way
+  round/front toggle and Advanced's three-way fade/mirror/wrap write the same
+  `photoPlacement.seam`, because Mirror has no plain-language framing worth a third
+  button up front.)
+- **Explanatory prose under a control that needs none.** A hint paragraph was added under
+  the Quality slider explaining what it sets; the verdict was *"too much text under the
+  quality slider. end user dont care."* A four-stop slider labelled Draft/Standard/Fine/Ultra
+  is self-evident. Keep hints for things that are genuinely surprising (the neck-taper
+  warning, the ±10% cut-time caveat, what the seam does to a photo) and nowhere else.
+
 ---
 
 ## Port plan
@@ -260,6 +309,10 @@ Do not build the UI first.
 (This list predates the preset library, the custom shape editor, and mobile support,
 none of which it describes — treat it as a historical starting spec, not current UI
 inventory. The two bullets above are the exception, added when those features shipped.)
+
+It is also pre-simplification: most of the individual knobs it lists have since moved
+behind a collapsed Advanced block. **Rule 10 is the current spec for what the default
+panel shows.**
 
 ## Constraints
 

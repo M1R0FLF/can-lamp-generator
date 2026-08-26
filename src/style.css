@@ -148,6 +148,27 @@ input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0; }
 .readout .value.danger { color: var(--danger); font-weight: 600; }
 .readout .value.ok { color: var(--ok); }
 
+/* The one line that answers "can I cut this?". Coloured left border rather than
+   a coloured background: the panel already has a lot of surfaces, and a tinted
+   block at this size read as an error state even when the news was good. */
+.status-line {
+  margin: 0 0 10px;
+  padding: 7px 9px 7px 11px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  border-left: 3px solid var(--border);
+  background: var(--panel-2);
+  border-radius: 0 4px 4px 0;
+  color: var(--text-dim);
+}
+.status-line.good { border-left-color: var(--ok); color: var(--ok); }
+.status-line.warn { border-left-color: var(--accent); color: var(--accent); }
+.status-line.bad  { border-left-color: var(--danger); color: var(--danger); font-weight: 600; }
+
+/* A disclosure nested inside a .ctrl panel shouldn't draw the section divider
+   that a top-level Advanced block does. */
+details.advanced.nested { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+
 button.primary {
   width: 100%;
   padding: 9px;
@@ -212,6 +233,7 @@ button.secondary.active:hover { color: #1a1200; border-color: var(--accent); }
   background: color-mix(in srgb, var(--accent) 12%, var(--panel-2));
 }
 
+#paletteScopeSeg { margin-bottom: 8px; }
 .cat-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 7px; }
 .cat-tabs button {
   background: var(--panel-2);
@@ -228,7 +250,7 @@ button.secondary.active:hover { color: #1a1200; border-color: var(--accent); }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
   gap: 5px;
-  max-height: 148px;
+  max-height: 200px;
   overflow-y: auto;
 }
 .palette button {
@@ -629,7 +651,7 @@ input[type="range"].vslider {
   .palette {
     grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
     gap: 7px;
-    max-height: 210px;
+    max-height: 260px;
   }
   .palette button { font-size: 23px; }
 

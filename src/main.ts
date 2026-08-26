@@ -23,7 +23,7 @@ import {
   placementFor,
 } from './engine/photo';
 import { PRESETS, getPreset } from './engine/presets';
-import { Hole, StippleMode, StippleParams, DEFAULT_STIPPLE } from './engine/stipple';
+import { Hole, StippleParams, DEFAULT_STIPPLE } from './engine/stipple';
 import { renderGlow } from './engine/glow';
 import { createCan3D, CAN_STYLES, Can3D } from './render3d';
 import {
@@ -46,6 +46,7 @@ import {
   SHAPE_CATEGORIES,
   ShapeCategory,
   shapesInCategory,
+  simpleShapes,
   getShapeDef,
 } from './engine/shapes/library';
 import {
@@ -71,6 +72,7 @@ type SourceKind = 'preset' | 'custom' | 'photo';
 type HoleMode = 'varying' | 'fixed';
 type PreviewMode = 'lit' | 'unlit' | 'field';
 type ViewMode = 'both' | 'flat' | 'can';
+type PaletteScope = 'simple' | 'all';
 type AnnotationAnchor = AnnotationSpec['yAnchor'];
 
 interface State {
@@ -93,6 +95,7 @@ interface State {
   shapes: CustomShape[];
   selectedIds: Set<string>;
   paletteCategory: ShapeCategory;
+  paletteScope: PaletteScope;
   /** which band of the 142mm reference design shows on a shorter can: 0=bottom, 1=top */
   panY: number;
   canStyleId: string;
@@ -130,6 +133,7 @@ const state: State = {
   shapes: starterShapes(),
   selectedIds: new Set<string>(),
   paletteCategory: 'basic',
+  paletteScope: 'simple',
   panY: 0,
   canStyleId: CAN_STYLES[0].id,
   annotationText: '',
@@ -339,10 +343,23 @@ function formatDuration(sec: number): string {
   return `${h}h ${m}m`;
 }
 
+/**
+ * The panel answers one question — "can I cut this?" — and the two numbers a
+ * person actually plans around. Everything that used to be on this panel is
+ * still computed and still shown, one disclosure down under "Details".
+ *
+ * Both checks are existing CLAUDE.md rules, just stated as consequences
+ * instead of as measurements: rule 2 (webs below ~0.3mm tear in 0.1mm
+ * aluminium) and rule 8's open-area guardrail (too little pattern reads as
+ * broken; too much leaves no dark ground).
+ */
 function renderReadout() {
+  const statusEl = el('roStatus');
   if (!result) {
     setText('roHoleCount', '—');
     setText('roMinWeb', '—');
+    setText('roStatus', 'Generating…');
+    if (statusEl) statusEl.className = 'status-line';
     return;
   }
   const r = result;
@@ -350,24 +367,46 @@ function renderReadout() {
   setText('roGrid', `${r.cols} × ${r.rows}`);
   setText('roHoleCount', r.holes.length.toLocaleString());
 
+  const webOk = !Number.isFinite(r.minWeb) || r.minWeb >= state.minWebTarget;
   const minWebEl = el('roMinWeb');
   minWebEl.textContent = Number.isFinite(r.minWeb) ? `${r.minWeb.toFixed(3)} mm` : '—';
-  minWebEl.className = 'value ' + (r.minWeb < state.minWebTarget ? 'danger' : 'ok');
+  minWebEl.className = 'value ' + (webOk ? 'ok' : 'danger');
 
   let area = 0;
   for (const h of r.holes) area += Math.PI * h.r * h.r;
   const openAreaPct = (100 * area) / (r.W * r.H);
   const openAreaEl = el('roOpenArea');
   openAreaEl.textContent = `${openAreaPct.toFixed(1)} %`;
-  const openAreaOk = openAreaPct >= DEFAULT_OPEN_AREA_MIN_PCT && openAreaPct <= DEFAULT_OPEN_AREA_MAX_PCT;
+  const tooSparse = openAreaPct < DEFAULT_OPEN_AREA_MIN_PCT;
+  const tooOpen = openAreaPct > DEFAULT_OPEN_AREA_MAX_PCT;
+  const openAreaOk = !tooSparse && !tooOpen;
   openAreaEl.className = 'value ' + (openAreaOk ? 'ok' : 'danger');
   openAreaEl.title = openAreaOk
     ? ''
-    : openAreaPct < DEFAULT_OPEN_AREA_MIN_PCT
+    : tooSparse
       ? `Under ${DEFAULT_OPEN_AREA_MIN_PCT}% — reads as mostly black/empty (CLAUDE.md rule 8)`
       : `Over ${DEFAULT_OPEN_AREA_MAX_PCT}% — leaves no dark ground for contrast (CLAUDE.md rule 8)`;
   setText('roCutTime', formatDuration(estimateCutSeconds(r.holes.length, state.laserSpeed, state.laserPasses)));
   setText('roGenTime', `${(r.buildMs + r.sampleMs).toFixed(0)} ms`);
+
+  // Worst problem first: a torn can is a scrapped can, a dull one is only dull.
+  let msg: string;
+  let cls: string;
+  if (!webOk) {
+    msg = `Metal between holes is only ${r.minWeb.toFixed(2)} mm — it may tear. Turn Quality down a step.`;
+    cls = 'status-line bad';
+  } else if (tooSparse) {
+    msg = 'Very little pattern — this will read as a mostly dark can. Try a bolder design or a brighter photo.';
+    cls = 'status-line warn';
+  } else if (tooOpen) {
+    msg = 'Almost no dark metal left, so nothing will stand out. Turn Quality down, or darken the photo.';
+    cls = 'status-line warn';
+  } else {
+    msg = 'Looks good to cut.';
+    cls = 'status-line good';
+  }
+  setText('roStatus', msg);
+  if (statusEl) statusEl.className = cls;
 }
 
 // ---------- previews ----------
@@ -686,7 +725,6 @@ function syncInputs() {
   set('thresh', s.thresh.toFixed(2));
   set('knee', s.knee.toFixed(2));
   set('stippleGamma', s.gamma.toFixed(2));
-  set('toneMode', s.mode);
   set('minWebTarget', state.minWebTarget.toFixed(2));
   set('laserSpeed', String(state.laserSpeed));
   set('laserPasses', String(state.laserPasses));
@@ -751,8 +789,6 @@ function syncInputs() {
   set('photoOffsetX', String(pl.offsetX));
   set('photoOffsetY', String(pl.offsetY));
   set('photoPosterize', String(pp.posterize));
-  set('photoGamma', String(pp.gamma));
-  set('photoLocalContrast', String(pp.localContrast));
   set('photoLocalContrastRadius', String(pp.localContrastRadiusMm));
   set('photoVignette', String(pp.vignette));
   set('photoEdgeBoost', String(pp.edgeBoost));
@@ -764,14 +800,23 @@ function syncInputs() {
   setText('photoOffsetXVal', `${pl.offsetX >= 0 ? '+' : ''}${Math.round(pl.offsetX * 100)}%`);
   setText('photoOffsetYVal', `${pl.offsetY >= 0 ? '+' : ''}${Math.round(pl.offsetY * 100)}%`);
   setText('photoPosterizeVal', pp.posterize >= 2 ? `${Math.round(pp.posterize)} steps` : 'off');
-  setText('photoGammaVal', pp.gamma.toFixed(2));
-  setText('photoLocalContrastVal', pp.localContrast.toFixed(2));
   setText('photoLocalContrastRadiusVal', `${pp.localContrastRadiusMm.toFixed(0)} mm`);
   setText('photoVignetteVal', pp.vignette.toFixed(2));
   setText('photoEdgeBoostVal', pp.edgeBoost.toFixed(2));
   setText('photoAmbientVal', pp.ambient.toFixed(2));
   setText('photoBlackPointVal', pp.blackPoint.toFixed(2));
   setText('photoWhitePointVal', pp.whitePoint.toFixed(2));
+  const brightness = gammaToBrightness(pp.gamma);
+  const contrast = localToContrast(pp.localContrast);
+  set('photoBrightness', String(Math.round(brightness)));
+  set('photoContrast', String(Math.round(contrast)));
+  setText('photoBrightnessVal', signed(brightness));
+  setText('photoContrastVal', signed(contrast));
+  for (const b of document.querySelectorAll<HTMLElement>('#photoWrapSeg button')) {
+    // 'mirror' matches neither — it is Advanced-only, and the hint says so.
+    const want = pl.seam === 'stretch' ? 'round' : pl.seam === 'fade' ? 'front' : '';
+    b.classList.toggle('active', b.dataset.wrap === want);
+  }
   for (const b of document.querySelectorAll<HTMLElement>('#photoFitSeg button')) {
     b.classList.toggle('active', b.dataset.fit === pl.fit);
   }
@@ -900,18 +945,6 @@ for (const [id, key] of [
     (state.overrides as any)[key] = v;
   });
 }
-
-el<HTMLSelectElement>('toneMode').addEventListener('change', () => {
-  state.overrides.mode = el<HTMLSelectElement>('toneMode').value as StippleMode;
-  if (state.overrides.mode === 'fm') state.holeMode = 'fixed';
-  else state.holeMode = 'varying';
-  for (const b of el('holeModeSeg').querySelectorAll('button')) {
-    b.classList.toggle('active', (b as HTMLElement).dataset.mode === state.holeMode);
-  }
-  el('fixedDiameterField').style.display = state.holeMode === 'fixed' ? 'block' : 'none';
-  syncInputs();
-  draftThenFull();
-});
 
 numInput('minWebTarget', (v) => (state.minWebTarget = v), true);
 numInput('laserSpeed', (v) => (state.laserSpeed = v), true);
@@ -1080,6 +1113,46 @@ photoFileInput.addEventListener('change', () => {
   });
 }
 
+/**
+ * Brightness and Contrast are the only two tone controls on the main photo
+ * panel. Neither is a new engine parameter — each is a plain-language view of
+ * one that already existed, so Advanced and `photoReset` stay authoritative
+ * and there is exactly one source of truth per value.
+ *
+ *   Brightness -> `gamma`, inverted (gamma is the perceptual -> open-area
+ *   exponent, so a HIGHER gamma is a DARKER can). Mapped geometrically about
+ *   the 1.6 default so 0 is the default and the two halves reach the ends of
+ *   the old slider's range (0.6 bright, 3.2 dark) — a linear map would put
+ *   the default off-centre and make the dark half feel dead.
+ *
+ *   Contrast -> `localContrast`, the large-radius unsharp. That is what
+ *   actually separates subject from background at this pitch; a global
+ *   black/white-point stretch does almost nothing here because autoLevels
+ *   already normalises the histogram. "Local contrast" is the honest name but
+ *   it is jargon, and it is the knob a person reaching for "contrast" wants.
+ */
+const GAMMA_MID = 1.6, GAMMA_BRIGHT = 0.6, GAMMA_DARK = 3.2;
+const LC_MID = 0.45, LC_MAX = 1.5;
+
+function brightnessToGamma(b: number): number {
+  const t = Math.max(-100, Math.min(100, b)) / 100;
+  return t >= 0
+    ? GAMMA_MID * Math.pow(GAMMA_BRIGHT / GAMMA_MID, t)
+    : GAMMA_MID * Math.pow(GAMMA_DARK / GAMMA_MID, -t);
+}
+function gammaToBrightness(g: number): number {
+  if (g <= GAMMA_MID) return 100 * Math.log(GAMMA_MID / g) / Math.log(GAMMA_MID / GAMMA_BRIGHT);
+  return -100 * Math.log(g / GAMMA_MID) / Math.log(GAMMA_DARK / GAMMA_MID);
+}
+function contrastToLocal(c: number): number {
+  const t = Math.max(-100, Math.min(100, c)) / 100;
+  return t >= 0 ? LC_MID + t * (LC_MAX - LC_MID) : LC_MID * (1 + t);
+}
+function localToContrast(lc: number): number {
+  return lc <= LC_MID ? 100 * (lc / LC_MID - 1) : (100 * (lc - LC_MID)) / (LC_MAX - LC_MID);
+}
+const signed = (v: number) => `${v > 0 ? '+' : ''}${Math.round(v)}`;
+
 /** Placement changes invalidate the resample; tone changes don't. */
 function photoPlace<K extends keyof PhotoPlacement>(id: string, key: K) {
   numInput(id, (v) => {
@@ -1098,9 +1171,9 @@ photoPlace('photoOffsetX', 'offsetX');
 photoPlace('photoOffsetY', 'offsetY');
 
 photoTone('photoPosterize', 'posterize');
-photoTone('photoGamma', 'gamma');
-photoTone('photoLocalContrast', 'localContrast');
 photoTone('photoLocalContrastRadius', 'localContrastRadiusMm');
+numInput('photoBrightness', (v) => (state.photoParams.gamma = brightnessToGamma(v)));
+numInput('photoContrast', (v) => (state.photoParams.localContrast = contrastToLocal(v)));
 photoTone('photoVignette', 'vignette');
 photoTone('photoEdgeBoost', 'edgeBoost');
 photoTone('photoAmbient', 'ambient');
@@ -1111,6 +1184,26 @@ el('photoFitSeg').addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest('button');
   if (!btn) return;
   state.photoPlacement.fit = btn.dataset.fit as PhotoFit;
+  syncInputs();
+  draftThenFull();
+});
+
+// The main panel offers the only seam choice that really matters — wrap the
+// whole way round, or sit as a medallion on the front. Advanced still carries
+// the full three-way control (Mirror is the third), and both write the same
+// state, so they can never disagree.
+el('photoWrapSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  if (btn.dataset.wrap === 'round') {
+    state.photoPlacement.seam = 'stretch';
+    state.photoPlacement.coverage = 1;
+  } else {
+    state.photoPlacement.seam = 'fade';
+    // Only widen a medallion that is already full-width; leave a coverage the
+    // user has deliberately narrowed in Advanced alone.
+    if (state.photoPlacement.coverage >= 0.995) state.photoPlacement.coverage = 0.62;
+  }
   syncInputs();
   draftThenFull();
 });
@@ -1369,7 +1462,7 @@ function refreshComposerUI() {
       ? `${n} shape${n === 1 ? '' : 's'} placed. Tap one to select it — <b>shift-tap</b> to select several.`
       : picked.length === 1
       ? '1 shape selected. Drag to move it, arrow keys to nudge, <b>Delete</b> to remove it.'
-      : `${picked.length} of ${n} selected. Align or arrange them below, or <b>Delete</b> to remove them together.`;
+      : `${picked.length} of ${n} selected. <b>Duplicate</b> or <b>Repeat around</b> them, or find align and space under <b>Advanced</b>.`;
 }
 
 /** Rebuild after any structural change to the shape list. */
@@ -1379,6 +1472,16 @@ function composerChanged() {
 }
 
 // ---------- palette ----------
+/**
+ * Two views of one library. 'simple' hides the category tabs entirely and shows
+ * the 20 curated stamps in their authored order; 'all' brings the tabs back and
+ * filters by category as before.
+ *
+ * Deliberately not a third tab alongside the six categories: a tab that is not
+ * a category, sitting in a row of categories, has to be read before it can be
+ * understood. A two-button scope switch above the row says which library you
+ * are looking at, which is the actual distinction.
+ */
 function buildCategoryTabs() {
   const tabs = el('catTabs');
   tabs.innerHTML = '';
@@ -1399,7 +1502,8 @@ function buildCategoryTabs() {
 function buildPalette() {
   const pal = el('palette');
   pal.innerHTML = '';
-  for (const def of shapesInCategory(state.paletteCategory)) {
+  const defs = state.paletteScope === 'simple' ? simpleShapes() : shapesInCategory(state.paletteCategory);
+  for (const def of defs) {
     const b = document.createElement('button');
     b.textContent = def.glyph;
     b.title = `${def.name} — drag onto the canvas, or tap to place it`;
@@ -1641,8 +1745,24 @@ window.addEventListener('keydown', (e) => {
   draftThenFull();
 });
 
-buildCategoryTabs();
-buildPalette();
+el('paletteScopeSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.paletteScope = btn.dataset.scope as PaletteScope;
+  applyPaletteScope();
+});
+
+/** Reflect state.paletteScope into the switch, the tab row and the grid. */
+function applyPaletteScope() {
+  for (const b of el('paletteScopeSeg').querySelectorAll('button')) {
+    b.classList.toggle('active', (b as HTMLElement).dataset.scope === state.paletteScope);
+  }
+  el('catTabs').style.display = state.paletteScope === 'all' ? 'flex' : 'none';
+  buildCategoryTabs();
+  buildPalette();
+}
+
+applyPaletteScope();
 refreshComposerUI();
 
 window.addEventListener('resize', debounce(() => {
