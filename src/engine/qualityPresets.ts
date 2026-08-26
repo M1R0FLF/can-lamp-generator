@@ -7,13 +7,41 @@ export interface QualityPreset {
 }
 
 // "Standard" is the Mango Salvaje reference tuple (CLAUDE.md: pitch 1.45,
-// 0.28-0.52mm, jitter 0.15) — the tuple known to work. The others scale
-// density/detail up and down from it; live min-web is the real check, not
-// these nominal numbers.
+// 0.28-0.52mm). The others scale density/detail up and down from it; live
+// min-web is the real check, not these nominal numbers.
+//
+// `jitter` is deliberately CONSTANT across the ladder, so Quality moves
+// resolution and nothing else — see CLAUDE.md rule 10a. It used to run
+// 0.15/0.15/0.15/0.05, which made Ultra the only rung that looked like a
+// lattice and left the other three visibly scattered: jitter displaces each
+// hole by `jitter * pitch`, and against the hole's own diameter that was 53%
+// at Draft, 42% at Standard and 37% at Fine against Ultra's 12%. Picking a
+// finer Quality therefore restyled the artwork instead of resolving it.
+//
+// 0.05 is Ultra's shipped value, i.e. the one a human looked at and liked, and
+// holding it everywhere lands every rung at 12-18% of a hole diameter. It is
+// also a large safety win under rule 2, because jitter erodes the web from
+// both holes at once (worst-case web, full tone, hash):
+//
+//   tuple      jitter 0.15   jitter 0.05
+//   Draft         0.847mm       1.329mm
+//   Standard      0.424mm       0.756mm
+//   Fine          0.303mm       0.557mm    <- was at the 0.30mm floor
+//   Ultra         0.242mm       0.466mm    <- why Ultra dropped it in the first place
+//
+// Maximum open area is unchanged to 2 decimal places at every rung (7.22 /
+// 11.67 / 14.59 / 15.05%), so this is not a brightness change — rule 10's
+// requirement that a non-tone axis stay flat in open area.
+//
+// Do not go below 0.05 here. At jitter 0 the hash screen degenerates into
+// visible chains (measured nearest-neighbour direction concentration at
+// mid-tone jumps 0.05 -> 0.47 at Standard), and a near-zero jitter at a fine
+// pitch reads as vertical striping, which wants `rowShift` instead — see the
+// note on StippleParams.rowShift.
 export const QUALITY_PRESETS: QualityPreset[] = [
-  { label: 'Draft', pitch: 2.2, dMin: 0.32, dMax: 0.62, jitter: 0.15 },
-  { label: 'Standard', pitch: 1.45, dMin: 0.28, dMax: 0.52, jitter: 0.15 },
-  { label: 'Fine', pitch: 1.15, dMin: 0.24, dMax: 0.46, jitter: 0.15 },
+  { label: 'Draft', pitch: 2.2, dMin: 0.32, dMax: 0.62, jitter: 0.05 },
+  { label: 'Standard', pitch: 1.45, dMin: 0.28, dMax: 0.52, jitter: 0.05 },
+  { label: 'Fine', pitch: 1.15, dMin: 0.24, dMax: 0.46, jitter: 0.05 },
   { label: 'Ultra', pitch: 0.98, dMin: 0.2, dMax: 0.4, jitter: 0.05 },
 ];
 
