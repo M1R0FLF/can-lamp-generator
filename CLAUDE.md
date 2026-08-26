@@ -528,6 +528,48 @@ lesson generalises — the algorithms worth porting from the halftoning literatu
 the ones that act *on* the existing grid (error diffusion, void-and-cluster), because
 those inherit rule 2 for free.
 
+### 10a. Quality is a resolution axis — so `jitter` must not move across it
+
+The same lesson as rule 10, found in the ladder rather than in the dither picker.
+`QUALITY_PRESETS` ran `jitter` at 0.15 / 0.15 / 0.15 / 0.05: three rungs at the presets'
+tuned value and then a cliff at Ultra, which had to drop it to keep rule 2's web (at
+0.98mm pitch, jitter 0.15 measures a 0.242mm worst-case web — under the 0.30mm floor).
+
+The result was reported as *"Fine has the holes randomly scattered ... meanwhile Ultra
+has them all neatly lined up, making it look much better. But it takes much longer"* —
+i.e. Ultra was the only rung that looked like a lattice, so the picker's real effect was
+**resolution plus a restyle**, and the only way to get the good-looking one was to buy
+38% more holes and 33% more cut time.
+
+What the eye actually reads is the wander **against the hole's own diameter**,
+`jitter * pitch / dMax`, and that ran 53% / 42% / 37% / 12% down the ladder. Holding
+`jitter` at Ultra's 0.05 everywhere lands all four rungs at 12-18%, and costs nothing
+measurable: maximum open area is unchanged to two decimals at every rung (7.22 / 11.67 /
+14.59 / 15.05%), so rule 10's flat-open-area requirement holds, and the worst-case web
+roughly doubles (Fine 0.303 -> 0.557mm; Fine was sitting *on* the floor).
+
+Three things worth keeping from how this was settled:
+
+- **The uniformity metric argued for the status quo, and it was wrong.** CoV of hole
+  counts over 5x5-cell windows against binomial says Draft is best at 0.15 (0.798) and
+  degrades monotonically to 0.05 (0.878). Rendered side by side, Draft at 0.05 is the one
+  where the honeycomb cells actually resolve; at 0.15 the comb is mush. The metric scores
+  "is this blue-noise-like", and near-lattice placement is *supposed* to score badly on
+  that — it is not measuring what the eye objects to. Rule 8 again: look at the PNG.
+- **The chaining risk is at zero, not at low.** Nearest-neighbour direction concentration
+  at mid-tone is flat across jitter 0.15 -> 0.05 (Standard: 0.029 -> 0.051) and only
+  explodes at exactly 0 (0.467). So the jitter that the hash screen genuinely needs is
+  *some*, not *much*. 0.05 is the floor; below it a fine pitch also starts reading as
+  vertical striping, which wants `rowShift` instead.
+- **Jitter erodes web from both holes at once**, so it costs roughly 2x its nominal value
+  in web — which is why the ladder's coarse end could afford it and the fine end could
+  not, and why the fix is also a safety win rather than a trade.
+
+The photo and portrait ladders are deliberately *not* changed to match: per rule 4d, a
+forked pipeline's constants were measured on its own material, and `PHOTO_QUALITY`'s
+jitter was chosen against a photograph's web budget. If they are ever revisited, revisit
+them with photographs, not with presets.
+
 ---
 
 ## Measurement harness

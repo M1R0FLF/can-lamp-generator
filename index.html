@@ -434,6 +434,10 @@
             <input type="number" id="jitter" min="0" max="0.5" step="0.01" />
           </div>
         </div>
+        <p class="hint">Jitter shifts every hole off the lattice by that fraction of the
+          pitch. Every Quality tuple uses <b>0.05</b>, which keeps the rows readable; much
+          above 0.10 the holes look scattered and the web between them shrinks twice as
+          fast. Below 0.05 the screen starts laying dots into visible chains.</p>
         <div class="row2">
           <div class="field">
             <label>Min Ø <span class="val" id="dMinVal"></span></label>
