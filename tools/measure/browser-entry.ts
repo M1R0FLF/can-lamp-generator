@@ -18,6 +18,11 @@ import * as presets from '../../src/engine/presets';
 import * as quality from '../../src/engine/qualityPresets';
 import * as response from './response';
 import * as bluenoise from '../../src/engine/bluenoise';
+import * as rng from '../../src/engine/rng';
+// The shape library, so a measurement can compose a custom scene the way
+// the UI's editor does instead of hardcoding one.
+import * as shapes from '../../src/engine/shapes/library';
+import * as customShapes from '../../src/engine/customShapes';
 
 (globalThis as any).LAMP = {
   ...generate,
@@ -32,4 +37,7 @@ import * as bluenoise from '../../src/engine/bluenoise';
   ...quality,
   ...response,
   ...bluenoise,
+  ...rng,
+  ...shapes,
+  ...customShapes,
 };

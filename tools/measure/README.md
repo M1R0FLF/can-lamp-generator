@@ -15,6 +15,7 @@ node tools/measure/calibration-tile.mjs out.svg           # one real can cut, to
 node tools/measure/bottle-tile.mjs OUTDIR                 # CO2-on-glass calibration wrap (see below)
 node tools/measure/run.mjs tools/measure/bottle-dot-test.mjs out.svg   # pitch x density glass test
 node tools/measure/run.mjs tools/measure/bottle-figure.mjs OUT  # a real design as dots on a bottle
+node tools/measure/run.mjs tools/measure/bottle-scatter-test.mjs OUT MIRO  # random shapes + a label
 ```
 
 `bottle-tile.mjs` is the odd one out: it is not a measurement of our engine but a
@@ -83,3 +84,20 @@ One more warning from experience: sanity-check that a comparison is actually com
 different things. An edit to `seam.mjs` once left a stale element in its config tuples,
 so every row silently destructured an invalid `dither`, fell back to the default, and
 printed three identical rows as a clean result.
+
+`bottle-scatter-test.mjs` is the mixed-content one: seven random shapes from the library
+at assigned sizes (22 down to 10mm, straddling rule 3's 16mm floor) plus a text label,
+in the engine's normal **hybrid** mode with dot Ø varying 0.20-0.45mm.
+
+That mode choice is a reversal. Every earlier glass test ran FM at one fixed dot size,
+reasoning that a scored dot is one spot wide whatever diameter is drawn. A real cut said
+otherwise — diameter does come through — so the size axis is back and rule 5's AM half is
+available on glass after all. The FM-only tests remain valid for what they measured; they
+were just built on a premise the bench overturned.
+
+Two placement bugs worth remembering, both caught by rendering rather than by reading the
+code. Sizes must be **assigned** rather than sampled: drawing a random size and rejecting
+placements that do not fit biases hard against the big ones, and a request for 10-22mm
+delivered seven shapes of 10-12. And the label's keep-out has to be its **actual box**,
+not a full-width band: on an 84mm panel a reserved band leaves nowhere for a 22mm shape
+to stand, and only two of seven placed.
