@@ -11,7 +11,19 @@ npm run measure tools/measure/mtf.mjs                     # modulation transfer 
 npm run measure tools/measure/dither.mjs                  # tone fidelity + uniformity
 npm run measure tools/measure/seam.mjs                    # wrap at x=0/W (CLAUDE.md rule 1)
 npm run measure:render                                    # lit/unlit PNGs into ./render-out
+node tools/measure/calibration-tile.mjs out.svg           # one real can cut, to settle Ø/web/heat
+node tools/measure/bottle-tile.mjs OUTDIR                 # CO2-on-glass calibration wrap (see below)
 ```
+
+`bottle-tile.mjs` is the odd one out: it is not a measurement of our engine but a
+**calibration job for a substrate we do not support yet**. Dark glass marked with a
+CO2 laser breaks the tool's founding assumption that a hole is an absence of material
+— nothing is removed, so contrast is angular (specular vs diffuse) rather than
+radiometric, and every open-area constant in the codebase loses its meaning. It emits
+a raster PNG (the right format for a gantry CO2 like the P2S, where thousands of tiny
+vector circles would be thousands of accel/decel cycles) plus a small vector SVG for
+the line-mode score comparison. Run it, cut it, read the five answers off it. Until
+those exist, any constant written for a glass mode would be invented.
 
 ## Run baseline before and after any sampler change
 
