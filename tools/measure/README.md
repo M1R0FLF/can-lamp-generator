@@ -14,6 +14,7 @@ npm run measure:render                                    # lit/unlit PNGs into 
 node tools/measure/calibration-tile.mjs out.svg           # one real can cut, to settle Ø/web/heat
 node tools/measure/bottle-tile.mjs OUTDIR                 # CO2-on-glass calibration wrap (see below)
 node tools/measure/bottle-dot-test.mjs out.svg            # quick 3-pitch x 4-power glass test
+node tools/measure/run.mjs tools/measure/bottle-figure.mjs OUT  # a real design as dots on a bottle
 ```
 
 `bottle-tile.mjs` is the odd one out: it is not a measurement of our engine but a
@@ -37,7 +38,14 @@ beam tracing a path barely larger than its own spot, so every drawn diameter lan
 0.98-1.45mm, and at 1mm pitch a 0.2mm spot is five spot-widths from its neighbour and
 cannot merge, so laddering down to 0.3mm was answering a question nobody was going to ask.
 What survives is the pair that decides something — a power that frosts without chipping,
-and whether the pitch we already use reads cleanly at it.
+and a pitch that is both bright enough and still resolves.
+
+Note the pitch range is **0.5-0.9mm, not the can's 0.98-1.45**. With dot size pinned at
+one spot, pitch is the only brightness control left: maximum coverage is one spot over one
+hex cell, which at the can's 1.45mm is 2.5% against the can's own 11.67%. Matching the can
+needs about 0.56mm pitch, which sits just above the merge floor — so the useful window is
+narrow, and it is the one to measure. `bottle-figure.mjs` shows the consequence: the same
+design at 1.2mm pitch barely registers and at 0.6mm reads properly.
 
 ## Run baseline before and after any sampler change
 
