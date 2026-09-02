@@ -13,7 +13,7 @@ npm run measure tools/measure/seam.mjs                    # wrap at x=0/W (CLAUD
 npm run measure:render                                    # lit/unlit PNGs into ./render-out
 node tools/measure/calibration-tile.mjs out.svg           # one real can cut, to settle Ø/web/heat
 node tools/measure/bottle-tile.mjs OUTDIR                 # CO2-on-glass calibration wrap (see below)
-node tools/measure/bottle-dot-test.mjs out.svg            # quick 3-pitch x 4-power glass test
+node tools/measure/run.mjs tools/measure/bottle-dot-test.mjs out.svg   # pitch x density glass test
 node tools/measure/run.mjs tools/measure/bottle-figure.mjs OUT  # a real design as dots on a bottle
 ```
 
@@ -28,24 +28,27 @@ the line-mode score comparison. Run it, cut it, read the five answers off it. Un
 those exist, any constant written for a glass mode would be invented.
 
 `bottle-dot-test.mjs` is the quick one, and the one to reach for first — a full grid
-test is what shattered the first bottle. Twelve patches, four layer settings to type in,
-about 1.3% of the wrap marked.
+test is what shattered the first bottle. Twenty patches at ONE power setting, about 2% of
+the wrap marked, with both axes engraved on the glass so a photographed result is
+self-describing.
 
-It got there by having two axes deleted, both of which had looked reasonable and were
-measuring nothing. **Dot size** is not controllable when scoring: a scored dot is the
-beam tracing a path barely larger than its own spot, so every drawn diameter lands as one
-0.15 x 0.2mm mark. **Fine pitch** is not where the work lives: the shipped can tuples run
-0.98-1.45mm, and at 1mm pitch a 0.2mm spot is five spot-widths from its neighbour and
-cannot merge, so laddering down to 0.3mm was answering a question nobody was going to ask.
-What survives is the pair that decides something — a power that frosts without chipping,
-and a pitch that is both bright enough and still resolves.
+Its axes are what is left after three others were deleted for measuring nothing. **Dot
+size** cannot vary when scoring: the beam traces a path barely larger than its own spot,
+so every drawn diameter lands as one 0.15 x 0.2mm mark, and rule 5's AM half is simply
+unavailable on glass. **Power** came out once it was known. What remains is pitch against
+density — pitch sets the ceiling (one spot over one hex cell, which at the can's 1.45mm is
+2.5% against the can's own 11.67%, so matching the can needs about 0.56mm), and density
+places a tone within it. If density does not read once frosted, glass gets line art and
+nothing else.
 
-Note the pitch range is **0.5-0.9mm, not the can's 0.98-1.45**. With dot size pinned at
-one spot, pitch is the only brightness control left: maximum coverage is one spot over one
-hex cell, which at the can's 1.45mm is 2.5% against the can's own 11.67%. Matching the can
-needs about 0.56mm pitch, which sits just above the merge floor — so the useful window is
-narrow, and it is the one to measure. `bottle-figure.mjs` shows the consequence: the same
-design at 1.2mm pitch barely registers and at 0.6mm reads properly.
+It runs through the harness rather than standing alone because that density decision has
+to be the **engine's**. A first cut screened it with a closed-form sine hash and the 50%
+and 25% patches came out visibly streaky — rule 10's chaining, which would have been read
+as "density looks blotchy on glass" when it was the test's own screen doing it.
+`bluenoise.ts` exists to fix exactly that, so the test uses it. Labels are seven-segment
+strokes rather than SVG `<text>`, because a `<text>` element needs the importing software
+to resolve a font, and when it cannot the label vanishes or arrives as a blob — which you
+find out with the bottle already in the machine.
 
 ## Run baseline before and after any sampler change
 

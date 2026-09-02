@@ -1,119 +1,180 @@
-#!/usr/bin/env node
-// Quick glass test: 3 pitches x 4 power settings, one bottle.
+// Glass test: pitch against density, at ONE known power. Axes are labelled.
 //
-//   node tools/measure/bottle-dot-test.mjs out.svg [diameter] [panelHeight] [dotMm]
+//   node tools/measure/run.mjs tools/measure/bottle-dot-test.mjs out.svg [diameter] [panelHeight] [dotMm]
 //
-// Deliberately small. Earlier versions laddered pitch from 0.3mm and dot size
-// from 0.15mm, and both axes turned out to be measuring nothing useful:
+// The earlier version spent its four colour layers on a power ladder. With
+// power settled that budget is free, and density is what it should have been
+// spent on, because density is the whole tone mechanism on glass:
 //
-//   - A scored dot is the beam tracing a path barely larger than its own spot,
-//     so every drawn diameter comes out as one 0.15 x 0.2mm mark.
-//   - Dot SIZE is not controllable when scoring, so a size ladder measured the
-//     plotter rather than the glass.
+//   - Dot SIZE cannot vary when scoring — the beam traces a path barely larger
+//     than its own spot, so every drawn diameter lands as one 0.15 x 0.2mm mark.
+//     Rule 5's AM half is simply unavailable.
+//   - That leaves FM. Pitch sets the CEILING (maximum coverage is one spot over
+//     one hex cell, pi*(d/2)^2 / (pitch^2*sqrt(3)/2)) and density sets where in
+//     that range a tone sits. If density does not read — if 25% and 75% look
+//     the same once frosted — then glass gets line art and nothing else, and
+//     that is worth knowing before any of the engine is ported.
 //
-// What is left is the pair that decides anything: a power that frosts without
-// chipping, and a pitch that is both bright enough and still resolves. Twelve
-// patches, four layer settings to type in, ~2% of the wrap marked.
+// Columns are pitch, rows are density, everything in one layer at the power you
+// already found. ~2% of the wrap marked.
+//
+// It runs through the harness rather than standing alone because the density
+// decision has to be the ENGINE's, not an approximation of it. A first cut used
+// a closed-form sine hash and its 50% and 25% patches came out visibly streaky
+// — which is rule 10's chaining, and it would have been read as "density looks
+// blotchy on glass" when it was the test's own screen doing it. bluenoise.ts
+// exists precisely to fix that, so this uses it.
 import fs from 'node:fs/promises';
 
-const [outPath = 'bottle-dot-test.svg', dArg = '60.9', hArg = '84', dotArg = '0.2'] =
-  process.argv.slice(2);
-const D = Number(dArg);
-const H = Number(hArg);
-const DOT = Number(dotArg);
-const W = Math.PI * D;
+const PITCHES = [0.5, 0.6, 0.7, 0.8, 1.0];
+const DENSITIES = [1.0, 0.75, 0.5, 0.25];
 
-// Rows. NOT the can's pitches, which is where the first version of this file
-// had them. With dot size pinned at one spot, pitch is the only brightness
-// control left, and maximum coverage is one spot over one hex cell:
-// pi*(d/2)^2 / (pitch^2 * sqrt(3)/2). At the can's 1.45mm that is 2.5% against
-// the can's own 11.67% — a quarter of the light before the artwork asks for
-// anything. Matching the can needs about 0.56mm. So the range worth testing is
-// the one just above the merge floor (~2x the 0.15 x 0.2mm spot), not the one
-// the presets happen to use.
-const PITCHES = [0.5, 0.7, 0.9];
-// Columns: one colour per power setting. Colour is how XCS and LightBurn split
-// a file into layers, and a layer is what carries its own power/speed — it is
-// the only way to get a dose ladder out of vector geometry, since a circle is
-// just a circle.
-const COLOURS = ['#e6194b', '#3cb44b', '#4363d8', '#f58231'];
-
-// Patches are sized against the HEAT budget, not against legibility: at 0.5mm
-// pitch a patch is 14.5% covered, against 4.5% at 0.9mm, so the fine row
-// dominates the total. 26 x 13mm keeps the whole job near 2% of the wrap and
-// still gives 52 x 30 dots in the finest patch, which is far more than needed
-// to see whether they have merged.
 const PATCH_W = 26;
-const PATCH_H = 13;
-const GAP = 8;
+const PATCH_H = 12;
+const GAP_X = 7;
+const GAP_Y = 6;
+const LABEL_L = 14; // left gutter for the density labels
+const LABEL_T = 12; // top band for the pitch labels
 
-const gridW = COLOURS.length * PATCH_W + (COLOURS.length - 1) * GAP;
-const gridH = PITCHES.length * PATCH_H + (PITCHES.length - 1) * GAP;
-const X0 = (W - gridW) / 2;
-const Y0 = (H - gridH) / 2;
+// ---------------------------------------------------------------- labels ---
+// Seven-segment strokes rather than SVG <text>: a <text> element needs the
+// importing software to resolve a font and convert it to paths, and when it
+// cannot, the label silently vanishes or arrives as a filled blob — neither of
+// which you discover until the bottle is in the machine. Segments are lines, so
+// they import as geometry everywhere.
+const SEGS = {
+  a: [0, 0, 1, 0], b: [1, 0, 1, 1], c: [1, 1, 1, 2], d: [0, 2, 1, 2],
+  e: [0, 1, 0, 2], f: [0, 0, 0, 1], g: [0, 1, 1, 1],
+};
+const DIGITS = {
+  0: 'abcdef', 1: 'bc', 2: 'abged', 3: 'abgcd', 4: 'fgbc',
+  5: 'afgcd', 6: 'afgedc', 7: 'abc', 8: 'abcdefg', 9: 'abcdfg',
+};
+const GLYPH_W = 2.2;
+const GLYPH_H = 3.6;
+const GLYPH_GAP = 0.8;
+const DOT_ADVANCE = 1.0;
 
-if (gridH > H - 4 || gridW > W - 8) {
-  throw new Error(`grid ${gridW.toFixed(0)}x${gridH}mm does not fit a ${W.toFixed(0)}x${H}mm wrap.`);
-}
+const labelWidth = (text) =>
+  [...text].reduce((w, ch) => w + (ch === '.' ? DOT_ADVANCE : GLYPH_W) + GLYPH_GAP, -GLYPH_GAP);
 
-/** Hex field of dots filling one patch. */
-function patch(x0, y0, pitch) {
-  const rowH = (pitch * Math.sqrt(3)) / 2;
-  const out = [];
-  for (let j = 0; (j + 0.5) * rowH < PATCH_H; j++) {
-    for (let i = 0; (i + 0.5 + (j % 2 ? 0.5 : 0)) * pitch < PATCH_W; i++) {
-      out.push({
-        x: x0 + (i + 0.5 + (j % 2 ? 0.5 : 0)) * pitch,
-        y: y0 + (j + 0.5) * rowH,
-      });
+function label(text, x, y) {
+  const parts = [];
+  let cx = x;
+  for (const ch of text) {
+    if (ch === '.') {
+      const yy = (y + GLYPH_H).toFixed(2);
+      parts.push(`<line x1="${cx.toFixed(2)}" y1="${yy}" x2="${(cx + 0.35).toFixed(2)}" y2="${yy}"/>`);
+      cx += DOT_ADVANCE + GLYPH_GAP;
+      continue;
     }
+    for (const seg of DIGITS[ch] ?? '') {
+      const [ax, ay, bx, by] = SEGS[seg];
+      parts.push(
+        `<line x1="${(cx + ax * GLYPH_W).toFixed(2)}" y1="${(y + (ay * GLYPH_H) / 2).toFixed(2)}" ` +
+          `x2="${(cx + bx * GLYPH_W).toFixed(2)}" y2="${(y + (by * GLYPH_H) / 2).toFixed(2)}"/>`
+      );
+    }
+    cx += GLYPH_W + GLYPH_GAP;
   }
-  return out;
+  return parts.join('');
 }
 
-// One group per colour, each holding that column's three pitch patches, so the
-// operator sets four numbers rather than twelve.
-const groups = COLOURS.map((colour, c) => {
-  const dots = [];
-  PITCHES.forEach((pitch, r) => {
-    dots.push(...patch(X0 + c * (PATCH_W + GAP), Y0 + r * (PATCH_H + GAP), pitch));
+export default async function ({ run, argv }) {
+  const outPath = argv[0] || 'bottle-dot-test.svg';
+  const D = Number(argv[1] ?? 60.9);
+  const H = Number(argv[2] ?? 84);
+  const DOT = Number(argv[3] ?? 0.2);
+  const W = Math.PI * D;
+
+  const gridW = PITCHES.length * PATCH_W + (PITCHES.length - 1) * GAP_X;
+  const gridH = DENSITIES.length * PATCH_H + (DENSITIES.length - 1) * GAP_Y;
+  if (LABEL_L + gridW > W - 2 || LABEL_T + gridH > H - 2) {
+    throw new Error(`grid ${gridW.toFixed(0)}x${gridH}mm does not fit a ${W.toFixed(0)}x${H}mm wrap.`);
+  }
+
+  const dots = await run(({ arg }) => {
+    const L = window.LAMP;
+    // The engine's own void-and-cluster mask, so the 50% and 25% patches are
+    // screened exactly the way a shipped design would be.
+    const mask = L.blueNoiseMask();
+    const out = [];
+    arg.PITCHES.forEach((pitch, c) => {
+      arg.DENSITIES.forEach((density, r) => {
+        const x0 = arg.LABEL_L + c * (arg.PATCH_W + arg.GAP_X);
+        const y0 = arg.LABEL_T + r * (arg.PATCH_H + arg.GAP_Y);
+        const rowH = (pitch * Math.sqrt(3)) / 2;
+        for (let j = 0; (j + 0.5) * rowH < arg.PATCH_H; j++) {
+          for (let i = 0; (i + 0.5 + (j % 2 ? 0.5 : 0)) * pitch < arg.PATCH_W; i++) {
+            if (density < 1 && L.maskAt(mask, i, j) >= density) continue;
+            out.push([
+              +(x0 + (i + 0.5 + (j % 2 ? 0.5 : 0)) * pitch).toFixed(2),
+              +(y0 + (j + 0.5) * rowH).toFixed(2),
+            ]);
+          }
+        }
+      });
+    });
+    return out;
+  }, { PITCHES, DENSITIES, PATCH_W, PATCH_H, GAP_X, GAP_Y, LABEL_L, LABEL_T });
+
+  const labels = [];
+  // Column headers: pitch in mm. toFixed(1) so 1.0 does not print as "1" and
+  // read as a different kind of number from its neighbours.
+  PITCHES.forEach((pitch, c) => {
+    const text = pitch.toFixed(1);
+    const x = LABEL_L + c * (PATCH_W + GAP_X) + (PATCH_W - labelWidth(text)) / 2;
+    labels.push(label(text, x, LABEL_T - GLYPH_H - 3));
   });
-  return { colour, dots };
-});
+  // Row headers: density percent, in the left gutter, vertically centred.
+  DENSITIES.forEach((density, r) => {
+    const text = String(Math.round(density * 100));
+    const y = LABEL_T + r * (PATCH_H + GAP_Y) + (PATCH_H - GLYPH_H) / 2;
+    labels.push(label(text, 2, y));
+  });
 
-const total = groups.reduce((n, g) => n + g.dots.length, 0);
-const markedPct = ((total * Math.PI * (DOT / 2) ** 2) / (W * H)) * 100;
-const circle = (h) => `<circle cx="${h.x.toFixed(2)}" cy="${h.y.toFixed(2)}" r="${(DOT / 2).toFixed(3)}"/>`;
+  const markedPct = ((dots.length * Math.PI * (DOT / 2) ** 2) / (W * H)) * 100;
 
-const svg = `<?xml version="1.0" encoding="UTF-8"?>
+  await fs.writeFile(outPath, `<?xml version="1.0" encoding="UTF-8"?>
 <!-- Glass dot test - Ø${D} x ${H}mm bottle, ${W.toFixed(1)}mm wrap. Ø${DOT}mm dots.
-     4 colours = 4 power settings, lowest first. Rows within each colour are
-     pitch: ${PITCHES.join(' / ')}mm, top to bottom.
-     ONE PASS. Repeated passes over the same geometry crack glass. -->
+     ONE power setting for everything. Columns are PITCH (mm), rows are DENSITY (%).
+     Labels are in their own layer (#4363d8) - engrave them at the same setting,
+     or delete that layer if you would rather keep the glass clean.
+     ONE PASS. Repeated passes over the same geometry crack glass.
+
+     Columns L->R, pitch mm: ${PITCHES.map((p) => p.toFixed(1)).join(' ')}
+     Rows top->bottom, density %: ${DENSITIES.map((d) => Math.round(d * 100)).join(' ')}
+     Marked area: ${markedPct.toFixed(2)}% of the wrap. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="${W.toFixed(3)}mm" height="${H.toFixed(3)}mm" viewBox="0 0 ${W.toFixed(3)} ${H.toFixed(3)}">
-<title>Glass dot test — Ø${D} × ${H}mm</title>
-<g id="orient" fill="#000000"><rect x="4" y="4" width="4" height="3"/></g>
-${groups
-  .map((g, k) => `<g id="power-${k + 1}" fill="${g.colour}" stroke="none">\n${g.dots.map(circle).join('\n')}\n</g>`)
-  .join('\n')}
+<title>Glass dot test — pitch × density, Ø${D} × ${H}mm</title>
+<g id="dots" fill="#000000" stroke="none">
+${dots.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="${(DOT / 2).toFixed(3)}"/>`).join('\n')}
+</g>
+<g id="labels" fill="none" stroke="#4363d8" stroke-width="0.3" stroke-linecap="round">
+${labels.join('\n')}
+</g>
 </svg>
-`;
-
-await fs.writeFile(outPath, svg);
-
-console.log(`wrote ${outPath}`);
-console.log(`Ø${D} x ${H}mm bottle, ${W.toFixed(1)}mm wrap, Ø${DOT}mm dots`);
-console.log(`${COLOURS.length} colours x ${PITCHES.length} pitches, ${total} dots, ${markedPct.toFixed(2)}% of the wrap marked`);
-console.log(`
-  COLUMNS (colour) = power.  ${COLOURS.join('  ')}  <- set these 4, lowest first
-  ROWS  top->bottom = pitch. ${PITCHES.join('  ')} mm
-  Orientation square: top-left, 4mm in from the seam.
-
-  One pass. Start around 10-15% power at 300mm/s on a 55W P2S and step up
-  across the four colours. Room-temperature bottle, air assist low.
-
-  Read: the brightest column that frosts without chipping is your power.
-  Then, at that power, the finest row still showing SEPARATE dots is your pitch.
-  Finer is brighter here - with dot size pinned, pitch is the only brightness
-  control - so you want the finest row that has not merged, not a safe middle.
 `);
+
+  console.log(`wrote ${outPath}`);
+  console.log(`Ø${D} x ${H}mm bottle, ${W.toFixed(1)}mm wrap, Ø${DOT}mm dots, one power setting`);
+  console.log(`${PITCHES.length} pitches x ${DENSITIES.length} densities, ${dots.length} dots, ${markedPct.toFixed(2)}% of the wrap marked`);
+  console.log(`
+  COLUMNS left->right = PITCH mm:     ${PITCHES.map((p) => p.toFixed(1)).join('   ')}
+  ROWS    top->bottom = DENSITY %:    ${DENSITIES.map((d) => Math.round(d * 100)).join('   ')}
+  Both are engraved on the bottle, in the blue label layer.
+
+  One pass, one power - the one you already found. Room-temperature bottle.
+
+  READ IT FOR TWO THINGS
+  1. Down a column: do 100 / 75 / 50 / 25 actually look like four different
+     tones once frosted? That is the whole tone mechanism on glass - size
+     cannot vary when scoring, so if density does not read, the answer is line
+     art only and no amount of engine porting changes it.
+  2. Across the top row: the finest pitch whose dots are still SEPARATE. Finer
+     is brighter, so you want the finest that has not merged, not a safe middle.
+
+  The two interact: a fine pitch at 25% may look the same as a coarse pitch at
+  100%. If so, pitch is the only real control and density is decoration.
+`);
+}
