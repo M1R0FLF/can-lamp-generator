@@ -13,6 +13,7 @@ npm run measure tools/measure/seam.mjs                    # wrap at x=0/W (CLAUD
 npm run measure:render                                    # lit/unlit PNGs into ./render-out
 node tools/measure/calibration-tile.mjs out.svg           # one real can cut, to settle Ø/web/heat
 node tools/measure/bottle-tile.mjs OUTDIR                 # CO2-on-glass calibration wrap (see below)
+node tools/measure/bottle-dot-test.mjs out.svg            # just the pitch x diameter matrix, as vector SVG
 ```
 
 `bottle-tile.mjs` is the odd one out: it is not a measurement of our engine but a
@@ -24,6 +25,14 @@ a raster PNG (the right format for a gantry CO2 like the P2S, where thousands of
 vector circles would be thousands of accel/decel cycles) plus a small vector SVG for
 the line-mode score comparison. Run it, cut it, read the five answers off it. Until
 those exist, any constant written for a glass mode would be invented.
+
+`bottle-dot-test.mjs` is the low-risk subset of it: only the pitch-against-diameter
+matrix plus a four-layer dose strip, marking about 4% of the wrap and leaving the rest
+bare so heat has somewhere to go. Reach for it first — a full grid test is what shattered
+the first bottle. It emits SVG rather than a raster because the colour layers are how a
+dose ladder gets four different power settings out of one job; **run it as a fill, never
+as line/score**, since a traced outline on 2.5-3mm bottle glass is a scribe, and scribe
+plus thermal gradient is how glass is deliberately cut.
 
 ## Run baseline before and after any sampler change
 
