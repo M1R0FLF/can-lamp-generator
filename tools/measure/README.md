@@ -13,7 +13,7 @@ npm run measure tools/measure/seam.mjs                    # wrap at x=0/W (CLAUD
 npm run measure:render                                    # lit/unlit PNGs into ./render-out
 node tools/measure/calibration-tile.mjs out.svg           # one real can cut, to settle Ø/web/heat
 node tools/measure/bottle-tile.mjs OUTDIR                 # CO2-on-glass calibration wrap (see below)
-node tools/measure/bottle-dot-test.mjs out.svg            # just the pitch ladder, as vector SVG
+node tools/measure/bottle-dot-test.mjs out.svg            # quick 3-pitch x 4-power glass test
 ```
 
 `bottle-tile.mjs` is the odd one out: it is not a measurement of our engine but a
@@ -26,20 +26,18 @@ vector circles would be thousands of accel/decel cycles) plus a small vector SVG
 the line-mode score comparison. Run it, cut it, read the five answers off it. Until
 those exist, any constant written for a glass mode would be invented.
 
-`bottle-dot-test.mjs` is the low-risk subset of it: a pitch ladder plus a four-layer
-dose strip, marking about 3% of the wrap and leaving the rest bare so heat has somewhere
-to go. Reach for it first — a full grid test is what shattered the first bottle. It emits
-SVG rather than a raster because the colour layers are how a dose ladder gets four
-different power settings out of one job.
+`bottle-dot-test.mjs` is the quick one, and the one to reach for first — a full grid
+test is what shattered the first bottle. Twelve patches, four layer settings to type in,
+about 1.3% of the wrap marked.
 
-Dot size is a constant there, not an axis, and that is a deliberate reversal: the first
-version was a pitch x diameter matrix, because on glass the two axes really do interact.
-They only interact if diameter is controllable, though, and **in score mode it is not** —
-a scored dot is the beam tracing a path barely larger than its own spot, so every drawn
-diameter comes out as one 0.15 x 0.2mm mark and the size ladder measures the plotter
-rather than the glass. Size is only real in fill mode. Note also that scoring is the
-riskier mode on thick glass: a traced path is a scribe, and scribe plus thermal gradient
-is how glass is deliberately cut.
+It got there by having two axes deleted, both of which had looked reasonable and were
+measuring nothing. **Dot size** is not controllable when scoring: a scored dot is the
+beam tracing a path barely larger than its own spot, so every drawn diameter lands as one
+0.15 x 0.2mm mark. **Fine pitch** is not where the work lives: the shipped can tuples run
+0.98-1.45mm, and at 1mm pitch a 0.2mm spot is five spot-widths from its neighbour and
+cannot merge, so laddering down to 0.3mm was answering a question nobody was going to ask.
+What survives is the pair that decides something — a power that frosts without chipping,
+and whether the pitch we already use reads cleanly at it.
 
 ## Run baseline before and after any sampler change
 
