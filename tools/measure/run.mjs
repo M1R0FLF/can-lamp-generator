@@ -8,10 +8,13 @@
 // helper that evaluates `fn` inside the page with `window.LAMP` in scope.
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import path from 'node:path';
+import fs from 'node:fs';
 
-const here = path.dirname(new URL(import.meta.url).pathname);
+// fileURLToPath, not URL.pathname: on Windows the latter yields "/C:/..." and
+// path.join then produces "\C:\...", which esbuild cannot resolve.
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 const bundle = await build({
   entryPoints: [path.join(here, 'browser-entry.ts')],
@@ -26,8 +29,13 @@ const code = bundle.outputFiles[0].text;
 // The preinstalled Chromium (build 1194) predates whatever build this
 // playwright package wants, so point at it explicitly rather than letting
 // playwright look for a version-matched download that isn't there.
+// Only when it is actually there, though: that path is Linux-specific, and a
+// non-existent executablePath is a hard launch failure rather than a fallback.
+// Where it is absent (a dev machine that ran playwright install), omitting the
+// option lets playwright resolve its own browser.
+const pinnedChromium = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  ...(fs.existsSync(pinnedChromium) ? { executablePath: pinnedChromium } : {}),
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 const page = await browser.newPage();

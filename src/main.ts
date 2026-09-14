@@ -41,7 +41,7 @@ import {
   loadFaceFinder,
   faceWidthOnCan,
 } from './engine/faceFind';
-import { GENERATORS, DEFAULT_GENERATOR_ID, getGenerator } from './engine/generators';
+import { DEFAULT_GENERATOR_ID, getGenerator } from './engine/generators';
 import { Hole, StippleMode, StippleParams, DEFAULT_STIPPLE } from './engine/stipple';
 import { renderGlow } from './engine/glow';
 import { createCan3D, CAN_STYLES, Can3D } from './render3d';
@@ -65,6 +65,7 @@ import {
   SHAPE_CATEGORIES,
   ShapeCategory,
   shapesInCategory,
+  simpleShapes,
   getShapeDef,
 } from './engine/shapes/library';
 import {
@@ -90,6 +91,7 @@ type SourceKind = 'preset' | 'custom' | 'photo';
 type HoleMode = 'varying' | 'fixed';
 type PreviewMode = 'lit' | 'unlit' | 'field';
 type ViewMode = 'both' | 'flat' | 'can';
+type PaletteScope = 'simple' | 'all';
 type AnnotationAnchor = AnnotationSpec['yAnchor'];
 
 interface State {
@@ -114,6 +116,7 @@ interface State {
   shapes: CustomShape[];
   selectedIds: Set<string>;
   paletteCategory: ShapeCategory;
+  paletteScope: PaletteScope;
   /** which band of the 142mm reference design shows on a shorter can: 0=bottom, 1=top */
   panY: number;
   canStyleId: string;
@@ -166,6 +169,7 @@ const state: State = {
   shapes: starterShapes(),
   selectedIds: new Set<string>(),
   paletteCategory: 'basic',
+  paletteScope: 'simple',
   panY: 0,
   canStyleId: CAN_STYLES[0].id,
   annotationText: '',
@@ -250,14 +254,6 @@ const presetSelect = el<HTMLSelectElement>('preset');
   presetSelect.value = state.presetId;
 }
 
-// ---------- dot pattern picker ----------
-// Built from GENERATORS rather than written into index.html, so the catalogue
-// and its measured justifications stay in one file.
-// Set once the user picks a pattern by hand, so loading a photo stops
-// overriding them. Without it, choosing Classic for a photo and then loading a
-// different crop would silently snap back to the auto-picked pattern.
-let generatorTouched = false;
-
 // Set once the user moves the Punch slider, so auto-Punch stops overriding a
 // choice they made with the render in front of them.
 let punchTouched = false;
@@ -265,18 +261,6 @@ let punchTouched = false;
 // Set once the user picks face-vs-picture by hand, so detection on the next
 // upload stops overriding them.
 let photoModeTouched = false;
-
-function buildGeneratorPicker() {
-  const seg = el('generatorSeg');
-  seg.innerHTML = '';
-  for (const g of GENERATORS) {
-    const b = document.createElement('button');
-    b.dataset.gen = g.id;
-    b.textContent = g.name;
-    b.classList.toggle('active', g.id === state.generatorId);
-    seg.appendChild(b);
-  }
-}
 
 /**
  * Portrait params with `faceWidthMm` filled in from the live geometry.
@@ -307,6 +291,35 @@ function portraitParamsForCan(can: CanSpec): PortraitParams {
  * Separate from loading so that changing the head-size slider, or the can's
  * dimensions, re-frames without re-running detection.
  */
+/**
+ * Pick the dot pattern from the pipeline in play.
+ *
+ * This used to be a user-facing picker (Classic / Smooth / Detail) that ran
+ * once on image load and could then be corrected by hand. The picker is gone —
+ * all three patterns measure to the same open area and differ only in grain, so
+ * it was a decision without a visible payoff (CLAUDE.md rule 11) — which makes
+ * this the only thing that sets it, and it therefore has to run wherever the
+ * mode can change, not just on load.
+ *
+ * The reasoning for the values is unchanged and is worth keeping:
+ *
+ * Classic is out for any photograph: Smooth beats it on BOTH measured axes
+ * (MTF 0.785 vs 0.796 is a wash; chaining 0.013 vs 0.378 is not), and Classic
+ * is only the global default because it is what every preset was tuned
+ * against — a reason that has nothing to do with photographs.
+ *
+ * Between the other two the case for Detail is specifically a face: error
+ * diffusion holds ~13% more contrast at ~4mm features (see generators.ts) and
+ * 4mm is the size of an eye on a can, so Smooth renders the same face visibly
+ * softer. Without a face there is no feature at that scale worth protecting —
+ * rule 3's legible floor is ~16mm and closed — while Detail's cost is
+ * unchanged: its residual chaining lays dots into faint scratches across large
+ * near-flat areas, which is most of what a landscape or a product shot is.
+ */
+function applyAutoGenerator() {
+  state.generatorId = state.photoMode === 'portrait' ? 'detail' : 'smooth';
+}
+
 function reframeOnFace(): boolean {
   const img = state.photoImage;
   if (!img || !state.faceBox) return false;
@@ -479,10 +492,23 @@ function formatDuration(sec: number): string {
   return `${h}h ${m}m`;
 }
 
+/**
+ * The panel answers one question — "can I cut this?" — and shows the two
+ * numbers a person plans a session around. Everything that used to be on it is
+ * still computed and still shown, one disclosure down under "Details".
+ *
+ * Both checks are existing CLAUDE.md rules stated as consequences rather than
+ * as measurements: rule 2 (webs below ~0.3mm tear in 0.1mm aluminium) and rule
+ * 8's open-area guardrail (too little pattern reads as broken; too much leaves
+ * no dark ground).
+ */
 function renderReadout() {
+  const statusEl = el('roStatus');
   if (!result) {
     setText('roHoleCount', '—');
     setText('roMinWeb', '—');
+    setText('roStatus', 'Generating…');
+    if (statusEl) statusEl.className = 'status-line';
     return;
   }
   const r = result;
@@ -490,20 +516,23 @@ function renderReadout() {
   setText('roGrid', `${r.cols} × ${r.rows}`);
   setText('roHoleCount', r.holes.length.toLocaleString());
 
+  const webOk = !Number.isFinite(r.minWeb) || r.minWeb >= state.minWebTarget;
   const minWebEl = el('roMinWeb');
   minWebEl.textContent = Number.isFinite(r.minWeb) ? `${r.minWeb.toFixed(3)} mm` : '—';
-  minWebEl.className = 'value ' + (r.minWeb < state.minWebTarget ? 'danger' : 'ok');
+  minWebEl.className = 'value ' + (webOk ? 'ok' : 'danger');
 
   let area = 0;
   for (const h of r.holes) area += Math.PI * h.r * h.r;
   const openAreaPct = (100 * area) / (r.W * r.H);
   const openAreaEl = el('roOpenArea');
   openAreaEl.textContent = `${openAreaPct.toFixed(1)} %`;
-  const openAreaOk = openAreaPct >= DEFAULT_OPEN_AREA_MIN_PCT && openAreaPct <= DEFAULT_OPEN_AREA_MAX_PCT;
+  const tooSparse = openAreaPct < DEFAULT_OPEN_AREA_MIN_PCT;
+  const tooOpen = openAreaPct > DEFAULT_OPEN_AREA_MAX_PCT;
+  const openAreaOk = !tooSparse && !tooOpen;
   openAreaEl.className = 'value ' + (openAreaOk ? 'ok' : 'danger');
   openAreaEl.title = openAreaOk
     ? ''
-    : openAreaPct < DEFAULT_OPEN_AREA_MIN_PCT
+    : tooSparse
       ? `Under ${DEFAULT_OPEN_AREA_MIN_PCT}% — reads as mostly black/empty (CLAUDE.md rule 8)`
       : `Over ${DEFAULT_OPEN_AREA_MAX_PCT}% — leaves no dark ground for contrast (CLAUDE.md rule 8)`;
   // The separation cut is continuous length, not holes — pi*D of it, charged
@@ -515,8 +544,26 @@ function renderReadout() {
     formatDuration(estimateCutSeconds(r.holes.length, state.laserSpeed, state.laserPasses, extraPathMm))
   );
   setText('roGenTime', `${(r.buildMs + r.sampleMs).toFixed(0)} ms`);
-}
 
+  // Worst problem first: a torn can is a scrapped can, a dull one is only dull.
+  let msg: string;
+  let cls: string;
+  if (!webOk) {
+    msg = `Metal between holes is only ${r.minWeb.toFixed(2)} mm — it may tear. Turn Quality down a step.`;
+    cls = 'status-line bad';
+  } else if (tooSparse) {
+    msg = 'Very little pattern — this will read as a mostly dark can. Try a bolder design or a brighter photo.';
+    cls = 'status-line warn';
+  } else if (tooOpen) {
+    msg = 'Almost no dark metal left, so nothing will stand out. Turn Quality down, or darken the photo.';
+    cls = 'status-line warn';
+  } else {
+    msg = 'Looks good to cut.';
+    cls = 'status-line good';
+  }
+  setText('roStatus', msg);
+  if (statusEl) statusEl.className = cls;
+}
 // ---------- previews ----------
 function dotsCanvas(holes: Hole[], W: number, H: number, sp: number, tiles: number): HTMLCanvasElement {
   const c = document.createElement('canvas');
@@ -865,26 +912,6 @@ function syncInputs() {
   set('thresh', s.thresh.toFixed(2));
   set('knee', s.knee.toFixed(2));
   set('stippleGamma', s.gamma.toFixed(2));
-  set('toneMode', s.mode);
-  {
-    const gen = getGenerator(state.generatorId);
-    setText('generatorLabel', gen.name);
-    // AM carries tone purely in hole size, so there is no density decision for
-    // a dither to make and all three patterns come out identical. That is
-    // correct, but it looks broken — and the default preset (Mango Salvaje) is
-    // the one AM design in the library, so it is the first thing a new user
-    // clicks. Say so rather than letting the buttons appear dead.
-    setText(
-      'generatorHint',
-      s.mode === 'am'
-        ? `${gen.hint} Note: this design sets tone by hole size alone (Advanced → Tone mode: AM), ` +
-          'so the dot pattern makes no difference here. Switch Tone mode to Hybrid to use it.'
-        : gen.hint
-    );
-    for (const b of el('generatorSeg').querySelectorAll('button')) {
-      b.classList.toggle('active', (b as HTMLElement).dataset.gen === state.generatorId);
-    }
-  }
   set('minWebTarget', state.minWebTarget.toFixed(2));
   set('laserSpeed', String(state.laserSpeed));
   set('laserPasses', String(state.laserPasses));
@@ -971,10 +998,15 @@ function syncInputs() {
     setText('photoKindLabel', state.photoImage ? (state.photoMode === 'portrait' ? 'Portraits' : 'General') : '');
     // the two pipelines have disjoint controls; showing both would imply the
     // inactive set is doing something
+    // Each pipeline has a visible block and an Advanced block, and the two
+    // pipelines read disjoint params (PortraitParams vs PhotoParams), so
+    // showing both sets would imply the inactive one is doing something.
     const isPortrait = state.photoMode === 'portrait';
-    const pProps = document.getElementById('portraitProps');
-    if (pProps) pProps.style.display = isPortrait ? 'block' : 'none';
-    for (const id of ['photoToneGroup']) {
+    for (const id of ['portraitProps', 'portraitAdvanced']) {
+      const n = document.getElementById(id);
+      if (n) n.style.display = isPortrait ? 'block' : 'none';
+    }
+    for (const id of ['photoToneGroup', 'photoAdvancedGeneral']) {
       const n = document.getElementById(id);
       if (n) n.style.display = isPortrait ? 'none' : 'block';
     }
@@ -1009,6 +1041,11 @@ function syncInputs() {
   setText('photoAmbientVal', pp.ambient.toFixed(2));
   setText('photoBlackPointVal', pp.blackPoint.toFixed(2));
   setText('photoWhitePointVal', pp.whitePoint.toFixed(2));
+  for (const b of document.querySelectorAll<HTMLElement>('#photoWrapSeg button')) {
+    // 'mirror' matches neither — it is Advanced-only, and the hint says so.
+    const want = pl.seam === 'stretch' ? 'round' : pl.seam === 'fade' ? 'front' : '';
+    b.classList.toggle('active', b.dataset.wrap === want);
+  }
   for (const b of document.querySelectorAll<HTMLElement>('#photoFitSeg button')) {
     b.classList.toggle('active', b.dataset.fit === pl.fit);
   }
@@ -1140,18 +1177,6 @@ for (const [id, key] of [
     (state.overrides as any)[key] = v;
   });
 }
-
-el<HTMLSelectElement>('toneMode').addEventListener('change', () => {
-  state.overrides.mode = el<HTMLSelectElement>('toneMode').value as StippleMode;
-  if (state.overrides.mode === 'fm') state.holeMode = 'fixed';
-  else state.holeMode = 'varying';
-  for (const b of el('holeModeSeg').querySelectorAll('button')) {
-    b.classList.toggle('active', (b as HTMLElement).dataset.mode === state.holeMode);
-  }
-  el('fixedDiameterField').style.display = state.holeMode === 'fixed' ? 'block' : 'none';
-  syncInputs();
-  draftThenFull();
-});
 
 numInput('minWebTarget', (v) => (state.minWebTarget = v), true);
 numInput('laserSpeed', (v) => (state.laserSpeed = v), true);
@@ -1321,32 +1346,13 @@ async function loadPhotoFile(file: File | undefined | null) {
     }
     setText('faceStatus', faceMsg);
 
-    // A photograph never wants Classic, so switch off it on load rather than
-    // leaving the user to discover that. Which pattern it wants depends on
-    // whether there is a face, so this has to run after the detection above.
-    //
-    // Classic is out either way: Smooth beats it on BOTH measured axes for a
-    // photo (MTF 0.785 vs 0.796 is a wash; chaining 0.013 vs 0.378 is not),
-    // and Classic is only the global default because it is what every preset
-    // was tuned against — a reason that has nothing to do with photographs.
-    //
-    // Between the other two it is a real trade, and the case for Detail is
-    // specifically a face: error diffusion holds ~13% more contrast at ~4mm
-    // features (measured; see generators.ts) and 4mm is the size of an eye on
-    // a can, so Smooth renders the same face visibly softer. Without a face
-    // there is no feature at that scale worth protecting — rule 3's legible
-    // floor is ~16mm and closed — while Detail's cost is unchanged: its
-    // residual chaining lays dots into faint scratches across large near-flat
-    // areas, which is most of what a landscape or a product shot is made of.
-    // So the face pipeline gets Detail and everything else gets Smooth.
-    //
-    // This is reasoning from the two measured numbers, not a sweep over a
-    // corpus the way rule 4d's vignette was: if it is ever revisited, the way
-    // to settle it is tools/measure/render.mjs over real non-face photographs,
-    // because chaining is a look and no single metric ranks it against MTF.
-    if (!generatorTouched) {
-      state.generatorId = state.photoMode === 'portrait' ? 'detail' : 'smooth';
-    }
+    // A photograph never wants Classic, and which of the other two it wants
+    // depends on whether there is a face — so this has to run after the
+    // detection above. Reasoning and the measured numbers live on
+    // applyAutoGenerator(); if it is ever revisited, the way to settle it is
+    // tools/measure/render.mjs over real non-face photographs, because chaining
+    // is a look and no single metric ranks it against MTF.
+    applyAutoGenerator();
     // Punch (gamma) trades face brightness against face contrast, and the right
     // value is a property of the photograph rather than a constant — measured,
     // two portraits wanted values nearly a factor of two apart. Solve it from
@@ -1445,6 +1451,26 @@ el('photoFitSeg').addEventListener('click', (e) => {
   draftThenFull();
 });
 
+// The main panel offers the only seam choice that really matters — wrap the
+// whole way round, or sit as a medallion on the front. Advanced still carries
+// the full three-way control (Mirror is the third), and both write the same
+// state, so they can never disagree.
+el('photoWrapSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  if (btn.dataset.wrap === 'round') {
+    state.photoPlacement.seam = 'stretch';
+    state.photoPlacement.coverage = 1;
+  } else {
+    state.photoPlacement.seam = 'fade';
+    // Only narrow a medallion that is currently full-width; leave a coverage
+    // the user has deliberately set in Advanced alone.
+    if (state.photoPlacement.coverage >= 0.995) state.photoPlacement.coverage = 0.62;
+  }
+  syncInputs();
+  draftThenFull();
+});
+
 el('photoSeamSeg').addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest('button');
   if (!btn) return;
@@ -1475,6 +1501,7 @@ el('photoModeSeg').addEventListener('click', (e) => {
   if (!btn) return;
   state.photoMode = btn.dataset.photomode as 'portrait' | 'photo';
   photoModeTouched = true;
+  applyAutoGenerator();
   // switching INTO face mode should re-frame on the face, since the photo
   // pipeline's placement is a whole-image composition and the face pipeline's
   // is a crop; leaving the old one would show a face mode that looks broken
@@ -1563,16 +1590,6 @@ el('photoReset').addEventListener('click', () => {
       state.photoPlacement, state.photoParams, effectiveStipple()
     );
   }
-  syncInputs();
-  draftThenFull();
-});
-
-// dot pattern
-el('generatorSeg').addEventListener('click', (e) => {
-  const btn = (e.target as HTMLElement).closest('button');
-  if (!btn) return;
-  state.generatorId = btn.dataset.gen!;
-  generatorTouched = true;
   syncInputs();
   draftThenFull();
 });
@@ -1801,7 +1818,7 @@ function refreshComposerUI() {
       ? `${n} shape${n === 1 ? '' : 's'} placed. Tap one to select it — <b>shift-tap</b> to select several.`
       : picked.length === 1
       ? '1 shape selected. Drag to move it, arrow keys to nudge, <b>Delete</b> to remove it.'
-      : `${picked.length} of ${n} selected. Align or arrange them below, or <b>Delete</b> to remove them together.`;
+      : `${picked.length} of ${n} selected. <b>Duplicate</b> or <b>Repeat around</b> them, or find align and space under <b>Advanced</b>.`;
 }
 
 /** Rebuild after any structural change to the shape list. */
@@ -1811,6 +1828,16 @@ function composerChanged() {
 }
 
 // ---------- palette ----------
+/**
+ * Two views of one library. 'simple' hides the category tabs entirely and shows
+ * the 20 curated stamps in their authored order; 'all' brings the tabs back and
+ * filters by category as before.
+ *
+ * Deliberately not a seventh tab alongside the six categories: a tab that is
+ * not a category, sitting in a row of categories, has to be read before it can
+ * be understood. A two-button scope switch above the row says which library you
+ * are looking at, which is the actual distinction.
+ */
 function buildCategoryTabs() {
   const tabs = el('catTabs');
   tabs.innerHTML = '';
@@ -1831,7 +1858,8 @@ function buildCategoryTabs() {
 function buildPalette() {
   const pal = el('palette');
   pal.innerHTML = '';
-  for (const def of shapesInCategory(state.paletteCategory)) {
+  const defs = state.paletteScope === 'simple' ? simpleShapes() : shapesInCategory(state.paletteCategory);
+  for (const def of defs) {
     const b = document.createElement('button');
     b.textContent = def.glyph;
     b.title = `${def.name} — drag onto the canvas, or tap to place it`;
@@ -2073,8 +2101,24 @@ window.addEventListener('keydown', (e) => {
   draftThenFull();
 });
 
-buildCategoryTabs();
-buildPalette();
+el('paletteScopeSeg').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  state.paletteScope = btn.dataset.scope as PaletteScope;
+  applyPaletteScope();
+});
+
+/** Reflect state.paletteScope into the switch, the tab row and the grid. */
+function applyPaletteScope() {
+  for (const b of el('paletteScopeSeg').querySelectorAll('button')) {
+    b.classList.toggle('active', (b as HTMLElement).dataset.scope === state.paletteScope);
+  }
+  el('catTabs').style.display = state.paletteScope === 'all' ? 'flex' : 'none';
+  buildCategoryTabs();
+  buildPalette();
+}
+
+applyPaletteScope();
 refreshComposerUI();
 
 window.addEventListener('resize', debounce(() => {
@@ -2130,7 +2174,6 @@ el<HTMLButtonElement>('exportBtn').addEventListener('click', () => {
 
 // ---------- init ----------
 injectAnalytics(); // no-ops locally; only sends events once served from Vercel
-buildGeneratorPicker();
 applyViewMode();
 applyAnnotationProps();
 syncInputs();

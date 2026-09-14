@@ -570,6 +570,73 @@ forked pipeline's constants were measured on its own material, and `PHOTO_QUALIT
 jitter was chosen against a photograph's web budget. If they are ever revisited, revisit
 them with photographs, not with presets.
 
+### 11. The default panel is for someone who has never seen a laser
+
+Learned by shipping the opposite. The control surface grew to roughly 50 visible
+controls and the verdict was blunt: *"We have too much settings, that do too little...
+so many variables to change with our own image, usually very weird or unknown ones?
+Please dumb it down, you forget that normal people need to use this."*
+
+The rule: **the default panel carries only choices whose effect a non-expert can predict
+from the label.** Everything else goes behind a collapsed `<details class="advanced">` —
+kept, not deleted, because the tuning matters and the person running the laser is also a
+user.
+
+Where it landed:
+
+- **Preset path**: Can · Source · Personalize · one Quality slider · *Advanced ▸* ·
+  Ready to cut? — the whole panel fits on one screen.
+- **Own image**: six controls per pipeline. Portraits shows head size, face detail,
+  brightness, contrast, re-centre and reset; General shows brightness, contrast, invert
+  and reset; placement (where it goes, zoom, move x/y) is shared. The other twelve sit
+  under *Advanced ▸*, mode-gated the same way the visible blocks are — the two pipelines
+  read disjoint params (`PortraitParams` vs `PhotoParams`), so showing both sets would
+  imply the inactive one is doing something.
+- **Shape editor**: a *Simple / All shapes* switch over the palette. Simple drops the six
+  category tabs entirely and shows the 20 curated stamps in `SIMPLE_SHAPE_IDS`
+  ([library.ts](src/engine/shapes/library.ts)); All brings the tabs and the full library
+  back. Tools visible: size, rotation, Repeat around the can, Duplicate, Delete, Clear
+  all. *Advanced ▸* holds the six Align buttons and Space around / Space vertically /
+  Flip. **Repeat around stays on the main panel on purpose** — it is the one tool that
+  exists only because the substrate is a cylinder, and it is how a wrap pattern gets made.
+- **Ready to cut?** answers one question in a sentence ("Looks good to cut." / "Metal
+  between holes is only 0.21 mm — it may tear. Turn Quality down a step.") and shows the
+  two numbers a person plans a session around: hole count and rough cut time. The five
+  diagnostics live under *Details ▸*. Both checks are existing rules restated as
+  consequences: rule 2 on web thickness, rule 8's open-area guardrail.
+
+Four specific things not to re-add:
+
+- **The Dot pattern picker (Classic / Smooth / Detail).** This is the one the complaint
+  was actually about — *"3 dot patterns, which barely change anything?? Get rid of it."*
+  And rule 10 had already proved the user right in writing: all three measure to the
+  **same open area**, so switching changes the grain and nothing else. A three-way choice
+  whose payoff is invisible at arm's length is a decision with no reward. `GENERATORS`
+  stays, and so does the reasoned automatic choice — `applyAutoGenerator()` picks Detail
+  for a face and Smooth for everything else, Classic remains the preset default. Because
+  nothing can correct it by hand any more, that function must run at **every** point that
+  can change the pipeline, not just on image load; wiring it only into `loadPhotoFile`
+  left a manual Portraits switch rendering with Smooth.
+- **A user-facing tone-mode picker (FM / AM / Hybrid).** The three modes are real and
+  rule 5 needs all three, but they are a *design-time* choice: 20 of 21 presets ship
+  `hybrid` and photos force it regardless, so the select could not change anything a
+  user could see. Presets keep setting `stipple.mode` themselves.
+- **Two controls for one value.** The one deliberate exception is the seam: the main
+  panel's two-way round/front toggle and Advanced's three-way fade/mirror/wrap write the
+  same `photoPlacement.seam`, because Mirror has no plain-language framing worth a third
+  button up front. When `seam` is `mirror` neither main-panel button lights, and the
+  hint says where it came from.
+- **Explanatory prose under a control that needs none.** A hint paragraph was added under
+  the Quality slider explaining what it sets; the verdict was *"too much text under the
+  quality slider. end user dont care."* A four-stop slider labelled Draft/Standard/Fine/
+  Ultra is self-evident. Keep hints for the genuinely surprising (the neck-taper warning,
+  the ±10% cut-time caveat, what the seam does to a photo) and nowhere else.
+
+Note the shape of the mistake that produced the first attempt at this rule: the work was
+done against a checkout six commits stale, so "3 dot patterns" was read as the Tone mode
+select — the only three-way pattern control that existed on that base — and the actual
+Dot pattern panel was never touched. `git fetch` before scoping a UI complaint.
+
 ---
 
 ## Measurement harness
@@ -635,13 +702,15 @@ Do not build the UI first.
 - **Presets**: Mango Salvaje, Escarcha
 - **Quality**: `(pitch, d_min, d_max, jitter)` tuples, each showing hole count and rough
   cut-time estimate
-- **Advanced**: those four individually, plus min-web target
-- **Live readout**: hole count + measured min web, red when under target
+- **Advanced**: those four individually, plus min-web target, hole size and the laser
+  speed/passes the cut-time estimate uses. Collapsed by default (rule 11).
+- **Ready to cut?**: one plain-language verdict plus hole count and rough cut time; the
+  numeric diagnostics sit under a Details disclosure (rule 11)
 - **Preview**: unlit (dots on metal) / lit (backlit glow) toggle, and a cylinder mock-up
 - **Export**: SVG at exact mm dimensions, `viewBox = "0 0 W H"`
-- **Photo tone**: plain Brightness and Contrast sliders (neutral at 0) alongside Punch,
-  Simplify and Local contrast. Brightness is a gain, not an offset, so black stays black
-  per rule 5.
+- **Photo tone**: plain Brightness and Contrast sliders (neutral at 0) on the main
+  panel; Punch, Simplify and Local contrast moved into Advanced by rule 11. Brightness
+  is a gain, not an offset, so black stays black per rule 5.
 - **Personalize**: an optional short text label (name/date), composited on top of preset
   or custom alike — position as a fraction of circumference, vertical anchor + offset,
   letter height. See rule 9.
@@ -650,17 +719,22 @@ Do not build the UI first.
   in from below (rule 9b). No options: see the rule for why an offset knob would be
   wrong. Its hint carries the cut-order instruction, because getting that wrong is what
   ruins the job.
-- **Dot pattern**: the three named generators from `generators.ts` (rule 10), each with
-  a one-line hint. Sits between Quality and Hole size, since it is a peer of both.
-  Loading a photo switches off Classic unless the user has already picked one by
-  hand — to Detail when the face detector found a face, otherwise to Smooth. See
-  rule 4d: Detail's case is an eye-sized feature, so it does not transfer to a
-  photograph that has no face.
+- **Dot pattern**: no longer a panel. The three generators in `generators.ts` all
+  measure to the same open area, so the picker was a choice with no visible payoff and
+  rule 11 removed it. `applyAutoGenerator()` now sets it: Detail when the face detector
+  found a face, Smooth for any other photograph, Classic for presets. Per rule 4d,
+  Detail's case is an eye-sized feature, so it does not transfer to a photograph that has
+  no face. That function must run wherever the pipeline can change — nothing can correct
+  it by hand any more.
 
 (This list predates the preset library, the custom shape editor, and mobile support,
 none of which it describes — treat it as a historical starting spec, not current UI
 inventory. The three bullets above are the exception, added when those features
 shipped.)
+
+It is also mostly pre-simplification: most individual knobs it lists have since moved
+behind a collapsed Advanced block. **Rule 11 is the current spec for what the default
+panel shows.**
 
 ## Constraints
 
